@@ -32,6 +32,8 @@ import {
   Video,
   FolderOpen,
   LayoutDashboard,
+  Users,
+  Film,
 } from "lucide-react";
 import type { Asset, AssetType } from "@/types";
 
@@ -39,9 +41,10 @@ const typeIcons: Record<AssetType, React.ReactNode> = {
   image: <ImageIcon className="h-4 w-4" />,
   video: <Video className="h-4 w-4" />,
   script: <FileText className="h-4 w-4" />,
-  character: <ImageIcon className="h-4 w-4" />,
+  character: <Users className="h-4 w-4" />,
   scene: <ImageIcon className="h-4 w-4" />,
   canvas: <LayoutDashboard className="h-4 w-4" />,
+  storyboard: <Film className="h-4 w-4" />,
 };
 
 export default function AssetsPage() {
@@ -146,6 +149,7 @@ export default function AssetsPage() {
             <SelectItem value="video">Videos</SelectItem>
             <SelectItem value="character">Characters</SelectItem>
             <SelectItem value="scene">Scenes</SelectItem>
+            <SelectItem value="storyboard">Storyboards</SelectItem>
             <SelectItem value="canvas">Canvas</SelectItem>
           </SelectContent>
         </Select>

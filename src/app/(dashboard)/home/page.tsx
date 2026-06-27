@@ -61,7 +61,7 @@ const features = [
     icon: Users,
     color: "text-pink-500",
     bgColor: "bg-pink-500/10",
-    available: false,
+    available: true,
   },
   {
     href: "/scene",
@@ -70,7 +70,7 @@ const features = [
     icon: Palette,
     color: "text-yellow-500",
     bgColor: "bg-yellow-500/10",
-    available: false,
+    available: true,
   },
   {
     href: "/canvas",
@@ -88,7 +88,7 @@ const features = [
     icon: Film,
     color: "text-red-500",
     bgColor: "bg-red-500/10",
-    available: false,
+    available: true,
   },
 ];
 

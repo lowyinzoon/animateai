@@ -16,12 +16,10 @@ import {
   User,
   Sparkles,
   ChevronLeft,
-  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -33,14 +31,11 @@ const mainNav = [
   { href: "/image-gen", label: "Image Generation", icon: ImageIcon },
   { href: "/video-gen", label: "Video Generation", icon: Video },
   { href: "/script", label: "Script Writing", icon: FileText },
+  { href: "/character", label: "Character Design", icon: Users },
   { href: "/canvas", label: "Canvas Editor", icon: LayoutDashboard },
+  { href: "/scene", label: "Scene Design", icon: Palette },
+  { href: "/storyboard", label: "Story Films", icon: Film },
   { href: "/assets", label: "Asset Library", icon: FolderOpen },
-];
-
-const phase2Nav = [
-  { href: "/character", label: "Character Design", icon: Users, locked: true },
-  { href: "/scene", label: "Scene Design", icon: Palette, locked: true },
-  { href: "/storyboard", label: "Story Films", icon: Film, locked: true },
 ];
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
@@ -104,43 +99,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               >
                 <item.icon className="h-5 w-5 shrink-0" />
                 {!collapsed && <span>{item.label}</span>}
-              </Link>
-            );
-          })}
-
-          <Separator className="my-3" />
-
-          {!collapsed && (
-            <p className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Coming Soon
-            </p>
-          )}
-          {phase2Nav.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                  collapsed && "justify-center px-2"
-                )}
-                title={collapsed ? item.label : undefined}
-              >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {!collapsed && (
-                  <>
-                    <span className="flex-1">{item.label}</span>
-                    {item.locked && (
-                      <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                        <Lock className="h-3 w-3" />
-                      </Badge>
-                    )}
-                  </>
-                )}
               </Link>
             );
           })}
