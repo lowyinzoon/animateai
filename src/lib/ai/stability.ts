@@ -1,0 +1,81 @@
+const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images/generations";
+
+interface ImageGenParams {
+  prompt: string;
+  negative_prompt?: string;
+  width: number;
+  height: number;
+  style_preset?: string;
+}
+
+export async function generateImage(params: ImageGenParams): Promise<Buffer> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY is not configured");
+  }
+
+  // Map dimensions to GPT Image supported sizes
+  const size = mapToSupportedSize(params.width, params.height);
+
+  // Build enhanced prompt with style and negative prompt
+  let enhancedPrompt = params.prompt;
+  if (params.style_preset && params.style_preset !== "none") {
+    const styleLabel = params.style_preset.replace(/-/g, " ");
+    enhancedPrompt = `${styleLabel} style: ${enhancedPrompt}`;
+  }
+  if (params.negative_prompt) {
+    enhancedPrompt += `. Avoid: ${params.negative_prompt}`;
+  }
+
+  const response = await fetch(OPENROUTER_IMAGES_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-image-1",
+      prompt: enhancedPrompt,
+      n: 1,
+      size,
+      quality: "high",
+    }),
+  });
+
+  if (!response.ok) {
+    let message = `Image generation error: ${response.status}`;
+    try {
+      const error = await response.json();
+      message = error.error?.message || message;
+    } catch {}
+    throw new Error(message);
+  }
+
+  const data = await response.json();
+  const imageData = data.data?.[0];
+
+  if (!imageData) {
+    throw new Error("No image data in response");
+  }
+
+  if (imageData.b64_json) {
+    return Buffer.from(imageData.b64_json, "base64");
+  }
+
+  if (imageData.url) {
+    const imgResponse = await fetch(imageData.url);
+    if (!imgResponse.ok) {
+      throw new Error("Failed to download generated image");
+    }
+    const arrayBuffer = await imgResponse.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  throw new Error("No image data in response");
+}
+
+function mapToSupportedSize(width: number, height: number): string {
+  if (width > height) return "1536x1024";
+  if (height > width) return "1024x1536";
+  return "1024x1024";
+}
