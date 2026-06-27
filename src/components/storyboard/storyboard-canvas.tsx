@@ -18,6 +18,14 @@ interface StoryboardCanvasProps {
   onUpdate: () => void;
 }
 
+function generateId(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export function StoryboardCanvas({
   storyboard,
   onEdit,
@@ -68,7 +76,7 @@ export function StoryboardCanvas({
 
   const handleAddPanel = () => {
     const newPanel: StoryboardPanel = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       order: panels.length,
       scene_description: "",
       dialogue: "",
