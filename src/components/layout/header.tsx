@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Menu, Bell, Coins } from "lucide-react";
+import { LogOut, User, Menu, Bell, Sparkles, Coins } from "lucide-react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -43,28 +43,30 @@ export function Header({ onMenuClick }: HeaderProps) {
       <div className="flex-1" />
 
       {/* Right-side button group */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {/* Publish button */}
-        <Button className="rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90">
+        <Button variant="ghost" className="gap-1.5 rounded-full border border-border px-4 text-sm text-foreground hover:bg-accent">
+          <Sparkles className="h-3.5 w-3.5" />
           Publish
         </Button>
 
         {/* Notification bell */}
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
+        <Button variant="ghost" size="icon" className="relative rounded-full">
+          <Bell className="h-4 w-4" />
+          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-primary" />
         </Button>
 
         {/* Credits + Avatar pill */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-1 outline-none transition-colors hover:bg-accent cursor-pointer">
-              <Coins className="h-4 w-4 text-primary" />
-              <span className="text-xs font-medium text-muted-foreground">100</span>
-              <Avatar className="h-7 w-7">
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
+          <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border border-border px-2.5 py-1 outline-none transition-colors hover:bg-accent cursor-pointer">
+            <Coins className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs font-medium">100</span>
+            <span className="text-[10px] text-muted-foreground">BASE</span>
+            <Avatar className="h-6 w-6">
+              <AvatarFallback className="bg-muted text-foreground text-[10px]">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <div className="px-2 py-1.5">
