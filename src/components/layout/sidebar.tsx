@@ -9,6 +9,7 @@ import {
   FolderOpen,
   LayoutDashboard,
   FileText,
+  Settings,
   Trash2,
   MessageCircle,
   HelpCircle,
@@ -23,6 +24,7 @@ const primaryNav = [
 ];
 
 const bottomNav = [
+  { href: "/settings", label: "Settings", icon: Settings },
   { href: "#", label: "Trash", icon: Trash2 },
   { href: "#", label: "Discord", icon: MessageCircle },
   { href: "#", label: "Help", icon: HelpCircle },

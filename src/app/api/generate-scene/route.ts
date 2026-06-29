@@ -87,11 +87,12 @@ export async function POST(request: Request) {
     const enhancedPrompt = `${settingsPrefix}${prompt}. ${meta?.additional_details || ""}`.trim();
 
     // Generate image
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
     const imageBuffer = await generateImage({
       prompt: enhancedPrompt,
       width: width || 1024,
       height: height || 1024,
-    });
+    }, userOpenrouterKey);
 
     // Upload to storage
     const fileName = `${user.id}/scenes/${Date.now()}.png`;

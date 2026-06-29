@@ -26,13 +26,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
+    const userKlingKey = user.user_metadata?.api_keys?.kling;
     const taskId = await createVideoTask({
       prompt,
       image_url,
       duration: duration || 5,
       aspect_ratio: aspect_ratio || "16:9",
       resolution: resolution || "720p",
-    });
+    }, userKlingKey);
 
     const admin = createAdminClient();
 
@@ -79,7 +80,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "task_id is required" }, { status: 400 });
     }
 
-    const result = await getTaskResult(taskId);
+    const userKlingKey = user.user_metadata?.api_keys?.kling;
+    const result = await getTaskResult(taskId, userKlingKey);
     const admin = createAdminClient();
 
     // Update asset record when complete

@@ -23,7 +23,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const panels = await parseScriptToPanels(script_content);
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
+    const panels = await parseScriptToPanels(script_content, userOpenrouterKey);
 
     return NextResponse.json({
       success: true,

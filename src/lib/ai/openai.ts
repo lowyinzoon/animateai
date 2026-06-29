@@ -13,8 +13,8 @@ const LENGTH_INSTRUCTIONS: Record<string, string> = {
   long: "Write a detailed script, around 3000-4000 words.",
 };
 
-export async function generateScript(params: ScriptParams): Promise<ReadableStream> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+export async function generateScript(params: ScriptParams, overrideApiKey?: string): Promise<ReadableStream> {
+  const apiKey = overrideApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }

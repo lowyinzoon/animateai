@@ -21,7 +21,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const stream = await generateScript({ prompt, genre, tone, length });
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
+    const stream = await generateScript({ prompt, genre, tone, length }, userOpenrouterKey);
 
     // Return the streaming response
     return new Response(stream, {

@@ -8,8 +8,8 @@ interface ImageGenParams {
   style_preset?: string;
 }
 
-export async function generateImage(params: ImageGenParams): Promise<Buffer> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+export async function generateImage(params: ImageGenParams, overrideApiKey?: string): Promise<Buffer> {
+  const apiKey = overrideApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }

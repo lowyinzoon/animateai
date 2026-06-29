@@ -10,9 +10,10 @@ const VALID_SHOT_TYPES: ShotType[] = [
 ];
 
 export async function parseScriptToPanels(
-  scriptContent: string
+  scriptContent: string,
+  overrideApiKey?: string
 ): Promise<StoryboardPanel[]> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = overrideApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }

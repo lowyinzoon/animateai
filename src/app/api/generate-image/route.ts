@@ -27,13 +27,14 @@ export async function POST(request: Request) {
     }
 
     // Generate image via OpenRouter
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
     const imageBuffer = await generateImage({
       prompt,
       negative_prompt,
       width: width || 1024,
       height: height || 1024,
       style_preset,
-    });
+    }, userOpenrouterKey);
 
     // Use admin client for storage/DB (bypasses RLS)
     const admin = createAdminClient();

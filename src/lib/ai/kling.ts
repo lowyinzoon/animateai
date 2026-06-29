@@ -16,8 +16,8 @@ interface TaskResult {
   failMsg?: string;
 }
 
-export async function createVideoTask(params: VideoParams): Promise<string> {
-  const apiKey = process.env.KLING_API_KEY;
+export async function createVideoTask(params: VideoParams, overrideApiKey?: string): Promise<string> {
+  const apiKey = overrideApiKey || process.env.KLING_API_KEY;
   if (!apiKey) {
     throw new Error("KIE AI API key is not configured");
   }
@@ -65,8 +65,8 @@ export async function createVideoTask(params: VideoParams): Promise<string> {
   return data.data.taskId;
 }
 
-export async function getTaskResult(taskId: string): Promise<TaskResult> {
-  const apiKey = process.env.KLING_API_KEY;
+export async function getTaskResult(taskId: string, overrideApiKey?: string): Promise<TaskResult> {
+  const apiKey = overrideApiKey || process.env.KLING_API_KEY;
   if (!apiKey) {
     throw new Error("KIE AI API key is not configured");
   }

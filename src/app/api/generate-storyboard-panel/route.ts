@@ -69,11 +69,12 @@ export async function POST(request: Request) {
     const enhancedPrompt = `${styleLabel} style: ${panelPrompt}. Shot type: ${shotLabel} shot. ${panel.action_notes || ""}`.trim();
 
     // Generate image
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
     const imageBuffer = await generateImage({
       prompt: enhancedPrompt,
       width: width || 1536,
       height: height || 1024,
-    });
+    }, userOpenrouterKey);
 
     // Upload to storage
     const fileName = `${user.id}/storyboards/${Date.now()}.png`;

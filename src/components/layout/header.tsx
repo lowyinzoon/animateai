@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Menu, Bell, Sparkles, Coins } from "lucide-react";
+import { LogOut, User, Settings, Menu, Bell, Sparkles, Coins } from "lucide-react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -84,6 +84,15 @@ export function Header({ onMenuClick }: HeaderProps) {
             >
               <User className="mr-2 h-4 w-4" />
               Profile
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                window.location.href = "/settings";
+              }}
+              className="cursor-pointer"
+            >
+              <Settings className="mr-2 h-4 w-4" />
+              Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

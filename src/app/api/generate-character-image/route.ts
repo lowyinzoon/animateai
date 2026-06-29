@@ -66,11 +66,12 @@ export async function POST(request: Request) {
     const enhancedPrompt = `${styleLabel} style: ${meta.appearance_prompt}. ${prompt}. Maintain exact character appearance, proportions, and design details.`;
 
     // Generate image
+    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
     const imageBuffer = await generateImage({
       prompt: enhancedPrompt,
       width: width || 1024,
       height: height || 1024,
-    });
+    }, userOpenrouterKey);
 
     // Upload to storage
     const fileName = `${user.id}/characters/${Date.now()}.png`;
