@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Upload, X, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 
 interface ReferenceImageUploadProps {
   imageUrl: string | null;
@@ -20,7 +19,6 @@ export function ReferenceImageUpload({
   const [isUploading, setIsUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClient();
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -36,38 +34,27 @@ export function ReferenceImageUpload({
 
       setIsUploading(true);
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) {
-          toast.error("Not authenticated");
-          return;
-        }
+        const body = new FormData();
+        body.append("file", file);
+        body.append("folder", "characters");
 
-        const ext = file.name.split(".").pop() || "png";
-        const fileName = `${user.id}/characters/${Date.now()}.${ext}`;
+        const res = await fetch("/api/upload-image", {
+          method: "POST",
+          body,
+        });
 
-        const { error: uploadError } = await supabase.storage
-          .from("generated-images")
-          .upload(fileName, file, { contentType: file.type });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
 
-        if (uploadError) {
-          throw uploadError;
-        }
-
-        const { data: urlData } = supabase.storage
-          .from("generated-images")
-          .getPublicUrl(fileName);
-
-        onImageChange(urlData.publicUrl);
+        onImageChange(data.url);
         toast.success("Reference image uploaded");
-      } catch {
-        toast.error("Failed to upload image");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to upload image");
       } finally {
         setIsUploading(false);
       }
     },
-    [supabase, onImageChange]
+    [onImageChange]
   );
 
   const handleDrop = useCallback(
