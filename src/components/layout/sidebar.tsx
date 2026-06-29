@@ -16,7 +16,7 @@ import {
 
 const primaryNav = [
   { href: "/home", label: "Explore", icon: Compass },
-  { href: "/image-gen", label: "New", icon: Plus },
+  { href: "/workspace", label: "New", icon: Plus },
   { href: "/assets", label: "Projects", icon: FolderOpen },
   { href: "/canvas", label: "Assets", icon: LayoutDashboard },
   { href: "/script", label: "Skills", icon: FileText },

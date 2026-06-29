@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { generateImage } from "@/lib/ai/stability";
 import type { StoryboardMetadata } from "@/types";
+
+function createAdminClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +22,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const admin = createAdminClient();
+
     const body = await request.json();
     const { storyboardId, panelId, prompt, shot_type, style_preset, width, height } = body;
 
@@ -25,7 +35,7 @@ export async function POST(request: Request) {
     }
 
     // Load storyboard
-    const { data: storyboard, error: fetchError } = await supabase
+    const { data: storyboard, error: fetchError } = await admin
       .from("assets")
       .select("*")
       .eq("id", storyboardId)
@@ -67,7 +77,7 @@ export async function POST(request: Request) {
 
     // Upload to storage
     const fileName = `${user.id}/storyboards/${Date.now()}.png`;
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await admin.storage
       .from("generated-images")
       .upload(fileName, imageBuffer, { contentType: "image/png" });
 
@@ -79,7 +89,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: urlData } = supabase.storage
+    const { data: urlData } = admin.storage
       .from("generated-images")
       .getPublicUrl(fileName);
 
@@ -96,7 +106,7 @@ export async function POST(request: Request) {
       panels: updatedPanels,
     };
 
-    const { error: dbError } = await supabase
+    const { error: dbError } = await admin
       .from("assets")
       .update({
         metadata: updatedMeta as unknown as Record<string, unknown>,

@@ -134,6 +134,19 @@
     box-shadow: 0 0 20px oklch(0.65 0.25 350 / 15%), 0 0 40px oklch(0.65 0.25 350 / 5%);
   }
 
+  .canvas-dots {
+    background-image: radial-gradient(circle, oklch(0.25 0 0) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .text-gradient-pink {
     background: linear-gradient(135deg, oklch(0.65 0.25 350), oklch(0.60 0.20 310));
     -webkit-background-clip: text;

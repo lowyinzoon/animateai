@@ -1,4 +1,4 @@
-const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images/generations";
+const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images";
 
 interface ImageGenParams {
   prompt: string;
@@ -14,8 +14,8 @@ export async function generateImage(params: ImageGenParams): Promise<Buffer> {
     throw new Error("OPENROUTER_API_KEY is not configured");
   }
 
-  // Map dimensions to GPT Image supported sizes
-  const size = mapToSupportedSize(params.width, params.height);
+  // Map dimensions to aspect ratio
+  const aspect_ratio = mapToAspectRatio(params.width, params.height);
 
   // Build enhanced prompt with style and negative prompt
   let enhancedPrompt = params.prompt;
@@ -37,7 +37,7 @@ export async function generateImage(params: ImageGenParams): Promise<Buffer> {
       model: "openai/gpt-image-1",
       prompt: enhancedPrompt,
       n: 1,
-      size,
+      aspect_ratio,
       quality: "high",
     }),
   });
@@ -74,8 +74,8 @@ export async function generateImage(params: ImageGenParams): Promise<Buffer> {
   throw new Error("No image data in response");
 }
 
-function mapToSupportedSize(width: number, height: number): string {
-  if (width > height) return "1536x1024";
-  if (height > width) return "1024x1536";
-  return "1024x1024";
+function mapToAspectRatio(width: number, height: number): string {
+  if (width > height) return "3:2";
+  if (height > width) return "2:3";
+  return "1:1";
 }

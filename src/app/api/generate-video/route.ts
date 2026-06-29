@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createVideoTask, getTaskResult } from "@/lib/ai/kling";
+
+function createAdminClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -26,8 +34,10 @@ export async function POST(request: Request) {
       resolution: resolution || "720p",
     });
 
+    const admin = createAdminClient();
+
     // Save asset record with pending state
-    const { data: asset } = await supabase
+    const { data: asset } = await admin
       .from("assets")
       .insert({
         user_id: user.id,
@@ -70,10 +80,11 @@ export async function GET(request: Request) {
     }
 
     const result = await getTaskResult(taskId);
+    const admin = createAdminClient();
 
     // Update asset record when complete
     if (result.state === "success" && result.videoUrl && assetId) {
-      await supabase
+      await admin
         .from("assets")
         .update({
           file_url: result.videoUrl,
@@ -84,7 +95,7 @@ export async function GET(request: Request) {
     }
 
     if (result.state === "fail" && assetId) {
-      await supabase
+      await admin
         .from("assets")
         .update({
           metadata: { taskId, state: "fail", failMsg: result.failMsg },

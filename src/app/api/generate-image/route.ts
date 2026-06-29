@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { generateImage } from "@/lib/ai/stability";
+
+function createAdminClient() {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -18,7 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    // Generate image via Stability AI
+    // Generate image via OpenRouter
     const imageBuffer = await generateImage({
       prompt,
       negative_prompt,
@@ -27,9 +35,12 @@ export async function POST(request: Request) {
       style_preset,
     });
 
+    // Use admin client for storage/DB (bypasses RLS)
+    const admin = createAdminClient();
+
     // Upload to Supabase Storage
     const fileName = `${user.id}/${Date.now()}.png`;
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await admin.storage
       .from("generated-images")
       .upload(fileName, imageBuffer, {
         contentType: "image/png",
@@ -40,12 +51,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to save image" }, { status: 500 });
     }
 
-    const { data: urlData } = supabase.storage
+    const { data: urlData } = admin.storage
       .from("generated-images")
       .getPublicUrl(fileName);
 
     // Save asset record
-    const { data: asset, error: dbError } = await supabase
+    const { data: asset, error: dbError } = await admin
       .from("assets")
       .insert({
         user_id: user.id,

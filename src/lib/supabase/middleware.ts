@@ -40,6 +40,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname === "/forgot-password";
 
   const isDashboardRoute =
+    request.nextUrl.pathname.startsWith("/workspace") ||
     request.nextUrl.pathname.startsWith("/home") ||
     request.nextUrl.pathname.startsWith("/image-gen") ||
     request.nextUrl.pathname.startsWith("/video-gen") ||
