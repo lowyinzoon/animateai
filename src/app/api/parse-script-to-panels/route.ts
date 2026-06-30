@@ -24,7 +24,8 @@ export async function POST(request: Request) {
     }
 
     const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
-    const panels = await parseScriptToPanels(script_content, userOpenrouterKey);
+    const userLlmModel = user.user_metadata?.api_keys?.llm_model;
+    const panels = await parseScriptToPanels(script_content, userOpenrouterKey, userLlmModel);
 
     return NextResponse.json({
       success: true,

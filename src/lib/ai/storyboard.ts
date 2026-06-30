@@ -11,7 +11,8 @@ const VALID_SHOT_TYPES: ShotType[] = [
 
 export async function parseScriptToPanels(
   scriptContent: string,
-  overrideApiKey?: string
+  overrideApiKey?: string,
+  overrideModel?: string
 ): Promise<StoryboardPanel[]> {
   const apiKey = overrideApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -51,7 +52,7 @@ Return a JSON array where each element has these fields:
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o",
+      model: overrideModel || "openai/gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

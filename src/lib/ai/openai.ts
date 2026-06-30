@@ -13,7 +13,7 @@ const LENGTH_INSTRUCTIONS: Record<string, string> = {
   long: "Write a detailed script, around 3000-4000 words.",
 };
 
-export async function generateScript(params: ScriptParams, overrideApiKey?: string): Promise<ReadableStream> {
+export async function generateScript(params: ScriptParams, overrideApiKey?: string, overrideModel?: string): Promise<ReadableStream> {
   const apiKey = overrideApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -40,7 +40,7 @@ ${params.length ? LENGTH_INSTRUCTIONS[params.length] : LENGTH_INSTRUCTIONS.mediu
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-4o",
+      model: overrideModel || "openai/gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

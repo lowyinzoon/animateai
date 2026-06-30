@@ -13,15 +13,38 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { toast } from "sonner";
-import { Save, Eye, EyeOff, Key } from "lucide-react";
+import { Save, Eye, EyeOff, Key, Brain } from "lucide-react";
+
+const LLM_MODELS = [
+  { value: "openai/gpt-4o", label: "GPT-4o", provider: "OpenAI" },
+  { value: "openai/gpt-4.1", label: "GPT-4.1", provider: "OpenAI" },
+  { value: "openai/gpt-4.1-mini", label: "GPT-4.1 Mini", provider: "OpenAI" },
+  { value: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4", provider: "Anthropic" },
+  { value: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", provider: "Anthropic" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google" },
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "Google" },
+  { value: "deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3", provider: "DeepSeek" },
+] as const;
+
+const DEFAULT_LLM_MODEL = "openai/gpt-4o";
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
   const [openrouterKey, setOpenrouterKey] = useState("");
   const [klingKey, setKlingKey] = useState("");
+  const [llmModel, setLlmModel] = useState(DEFAULT_LLM_MODEL);
   const [showOpenrouter, setShowOpenrouter] = useState(false);
   const [showKling, setShowKling] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,6 +55,7 @@ export default function SettingsPage() {
       const keys = user.user_metadata.api_keys;
       setOpenrouterKey(keys.openrouter || "");
       setKlingKey(keys.kling || "");
+      setLlmModel(keys.llm_model || DEFAULT_LLM_MODEL);
     }
   }, [user]);
 
@@ -44,6 +68,7 @@ export default function SettingsPage() {
         api_keys: {
           openrouter: openrouterKey,
           kling: klingKey,
+          llm_model: llmModel,
         },
       },
     });
@@ -51,7 +76,7 @@ export default function SettingsPage() {
     if (error) {
       toast.error(error.message);
     } else {
-      toast.success("API keys saved!");
+      toast.success("Settings saved!");
     }
     setSaving(false);
   };
@@ -139,6 +164,60 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  LLM Model
+                </CardTitle>
+                <CardDescription>
+                  Choose which language model to use for script writing and
+                  storyboard parsing
+                </CardDescription>
+              </div>
+              <Badge variant="secondary">
+                {LLM_MODELS.find((m) => m.value === llmModel)?.label || "GPT-4o"}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Select
+                value={llmModel}
+                onValueChange={(v) => {
+                  if (v) setLlmModel(v);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from(
+                    new Set(LLM_MODELS.map((m) => m.provider))
+                  ).map((provider) => (
+                    <SelectGroup key={provider}>
+                      <SelectLabel>{provider}</SelectLabel>
+                      {LLM_MODELS.filter((m) => m.provider === provider).map(
+                        (model) => (
+                          <SelectItem key={model.value} value={model.value}>
+                            {model.label}
+                          </SelectItem>
+                        )
+                      )}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Used for script generation and storyboard parsing via OpenRouter
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
                   <Key className="h-4 w-4" />
                   Video Generation
                 </CardTitle>
@@ -190,7 +269,7 @@ export default function SettingsPage() {
           ) : (
             <Save className="mr-2 h-4 w-4" />
           )}
-          Save API Keys
+          Save Settings
         </Button>
       </form>
     </div>
