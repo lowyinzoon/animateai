@@ -6,6 +6,8 @@ interface ImageGenParams {
   width: number;
   height: number;
   style_preset?: string;
+  /** Reference image URL(s) to guide generation (character lock / img2img). */
+  reference_images?: string[];
 }
 
 export async function generateImage(params: ImageGenParams, overrideApiKey?: string): Promise<Buffer> {
@@ -27,6 +29,12 @@ export async function generateImage(params: ImageGenParams, overrideApiKey?: str
     enhancedPrompt += `. Avoid: ${params.negative_prompt}`;
   }
 
+  // When reference images are supplied, gpt-image-1 uses them to keep the subject
+  // (e.g. a locked character) consistent across generations.
+  const input_references = (params.reference_images ?? [])
+    .filter(Boolean)
+    .map((url) => ({ type: "image_url", image_url: { url } }));
+
   const response = await fetch(OPENROUTER_IMAGES_URL, {
     method: "POST",
     headers: {
@@ -39,6 +47,7 @@ export async function generateImage(params: ImageGenParams, overrideApiKey?: str
       n: 1,
       aspect_ratio,
       quality: "high",
+      ...(input_references.length > 0 ? { input_references } : {}),
     }),
   });
 

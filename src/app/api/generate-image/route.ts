@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { prompt, negative_prompt, width, height, style_preset } = body;
+    const { prompt, negative_prompt, width, height, style_preset, reference_images } = body;
 
     if (!prompt) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       width: width || 1024,
       height: height || 1024,
       style_preset,
+      reference_images: Array.isArray(reference_images) ? reference_images : undefined,
     }, userOpenrouterKey);
 
     // Use admin client for storage/DB (bypasses RLS)

@@ -295,12 +295,22 @@ export default function WorkspacePage() {
 
   // Generate an image for a specific frame; returns the image url (or null on failure).
   const generateIntoFrame = useCallback(
-    async (frameId: string, imagePrompt: string, label: string) => {
+    async (
+      frameId: string,
+      imagePrompt: string,
+      label: string,
+      referenceImages?: string[]
+    ) => {
       try {
         const res = await fetch("/api/generate-image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: imagePrompt, width: 1024, height: 1024 }),
+          body: JSON.stringify({
+            prompt: imagePrompt,
+            width: 1024,
+            height: 1024,
+            ...(referenceImages?.length ? { reference_images: referenceImages } : {}),
+          }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Generation failed");
@@ -360,18 +370,20 @@ export default function WorkspacePage() {
         return { frameId: f.id, panel };
       });
 
-      // 3) Render the locked character first, then each shot (keeps continuity visible).
+      // 3) Render the locked character first, then feed that image as a visual
+      //    reference into every shot so the character stays consistent.
       setAgentStatus(`Designing ${plan.character.name}…`);
-      await generateIntoFrame(
+      const characterUrl = await generateIntoFrame(
         charFrame.id,
         `Character reference sheet, full body, neutral pose, clean background. ${plan.character.appearance_prompt}`,
         `★ ${plan.character.name}`
       );
+      const characterRefs = characterUrl ? [characterUrl] : undefined;
 
       for (let i = 0; i < panelFrames.length; i++) {
         const { frameId, panel } = panelFrames[i];
         setAgentStatus(`Rendering shot ${i + 1} of ${panelFrames.length}…`);
-        await generateIntoFrame(frameId, panel.final_prompt, `Shot ${i + 1}`);
+        await generateIntoFrame(frameId, panel.final_prompt, `Shot ${i + 1}`, characterRefs);
       }
 
       toast.success(`"${plan.title}" — ${panelFrames.length} shots generated`);
