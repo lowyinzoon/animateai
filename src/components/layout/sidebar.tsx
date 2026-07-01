@@ -9,6 +9,7 @@ import {
   FolderOpen,
   LayoutDashboard,
   FileText,
+  Clapperboard,
   Settings,
   Trash2,
   MessageCircle,
@@ -18,6 +19,7 @@ import {
 const primaryNav = [
   { href: "/home", label: "Explore", icon: Compass },
   { href: "/workspace", label: "New", icon: Plus },
+  { href: "/gallery", label: "Gallery", icon: Clapperboard },
   { href: "/assets", label: "Projects", icon: FolderOpen },
   { href: "/canvas", label: "Assets", icon: LayoutDashboard },
   { href: "/script", label: "Skills", icon: FileText },

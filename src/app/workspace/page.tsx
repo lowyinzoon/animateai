@@ -639,6 +639,31 @@ export default function WorkspacePage() {
     }
   }, [frames, projectName, animateOne]);
 
+  // ── Publish to the community gallery ──
+
+  const handlePublish = useCallback(async () => {
+    const cover =
+      frames.find((f) => f.imageUrl && !(f.label ?? "").startsWith("★"))?.imageUrl ||
+      frames.find((f) => f.imageUrl)?.imageUrl ||
+      null;
+    if (!cover && !filmUrl) {
+      toast("Generate shots or assemble a film before publishing.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: projectName, cover_url: cover, video_url: filmUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Publish failed");
+      toast.success("Published to the gallery 🎉");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Publish failed");
+    }
+  }, [frames, projectName, filmUrl]);
+
   // ── Canvas event handlers ──
 
   const handleCanvasDoubleClick = useCallback(
@@ -901,7 +926,10 @@ export default function WorkspacePage() {
             <Film className="h-3.5 w-3.5" />
             Assemble Film
           </button>
-          <button className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/5 transition-colors">
+          <button
+            onClick={handlePublish}
+            className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/5 transition-colors"
+          >
             Publish
           </button>
           <div className="flex items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 py-1">
