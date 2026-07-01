@@ -116,6 +116,7 @@ export default function WorkspacePage() {
   const [frames, setFrames] = useState<WorkspaceFrame[]>([]);
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [showSkills, setShowSkills] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
@@ -286,6 +287,98 @@ export default function WorkspacePage() {
       setIsGenerating(false);
     }
   }, [prompt, selectedFrameId, createFrame, updateFrame]);
+
+  // ── Agent: one prompt → full storyboard on the canvas ──
+
+  // Generate an image for a specific frame; returns the image url (or null on failure).
+  const generateIntoFrame = useCallback(
+    async (frameId: string, imagePrompt: string, label: string) => {
+      try {
+        const res = await fetch("/api/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: imagePrompt, width: 1024, height: 1024 }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Generation failed");
+        updateFrame(frameId, { imageUrl: data.image_url, prompt: imagePrompt, label });
+        return data.image_url as string;
+      } catch (err) {
+        updateFrame(frameId, { label: `⚠ ${label}` });
+        toast.error(err instanceof Error ? err.message : "Generation failed");
+        return null;
+      }
+    },
+    [updateFrame]
+  );
+
+  const handleAgentRun = useCallback(async () => {
+    const idea = prompt.trim();
+    if (!idea) {
+      toast("Type your story idea first, then run the Agent.");
+      return;
+    }
+    setIsGenerating(true);
+    setAgentStatus("Directing your story…");
+
+    try {
+      // 1) Plan the whole short from a single idea.
+      const res = await fetch("/api/orchestrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea, panel_count: 5 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Orchestration failed");
+
+      const plan = data.plan as {
+        title: string;
+        character: { name: string; appearance_prompt: string };
+        panels: Array<{ id: string; final_prompt: string; scene_description: string }>;
+      };
+
+      setProjectName(plan.title || projectName);
+      setShowSkills(false);
+      setPrompt("");
+
+      // 2) Lay out a character sheet frame + one frame per panel in a grid.
+      const COL = 3;
+      const STEP = 320;
+
+      // Character frame (locked reference) on the left.
+      const charFrame = createFrame(-STEP * 1.4, 0);
+      updateFrame(charFrame.id, { label: `★ ${plan.character.name}` });
+
+      const panelFrames = plan.panels.map((panel, i) => {
+        const col = i % COL;
+        const row = Math.floor(i / COL);
+        const f = createFrame(col * STEP, (row - 0.5) * STEP);
+        updateFrame(f.id, { label: `Shot ${i + 1}` });
+        return { frameId: f.id, panel };
+      });
+
+      // 3) Render the locked character first, then each shot (keeps continuity visible).
+      setAgentStatus(`Designing ${plan.character.name}…`);
+      await generateIntoFrame(
+        charFrame.id,
+        `Character reference sheet, full body, neutral pose, clean background. ${plan.character.appearance_prompt}`,
+        `★ ${plan.character.name}`
+      );
+
+      for (let i = 0; i < panelFrames.length; i++) {
+        const { frameId, panel } = panelFrames[i];
+        setAgentStatus(`Rendering shot ${i + 1} of ${panelFrames.length}…`);
+        await generateIntoFrame(frameId, panel.final_prompt, `Shot ${i + 1}`);
+      }
+
+      toast.success(`"${plan.title}" — ${panelFrames.length} shots generated`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Agent failed");
+    } finally {
+      setIsGenerating(false);
+      setAgentStatus(null);
+    }
+  }, [prompt, projectName, createFrame, updateFrame, generateIntoFrame]);
 
   // ── Canvas event handlers ──
 
@@ -494,7 +587,7 @@ export default function WorkspacePage() {
           setShowSkills((v) => !v);
           break;
         case "Agent":
-          toast("Agent — coming soon");
+          handleAgentRun();
           break;
         case "Styles":
           toast("Styles — coming soon");
@@ -504,7 +597,7 @@ export default function WorkspacePage() {
           break;
       }
     },
-    [router]
+    [router, handleAgentRun]
   );
 
   // ── Render ──
@@ -693,6 +786,14 @@ export default function WorkspacePage() {
                 generating.
               </p>
             </div>
+          </div>
+        )}
+
+        {/* Agent status pill */}
+        {agentStatus && (
+          <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 flex items-center gap-2 rounded-full border border-pink-500/30 bg-black/70 px-4 py-1.5 backdrop-blur-sm">
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-pink-400" />
+            <span className="text-xs text-white/80">{agentStatus}</span>
           </div>
         )}
 
