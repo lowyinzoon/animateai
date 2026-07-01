@@ -103,41 +103,43 @@ function composeShotPrompt(plan: PlanDraft, shot: PlanShot): string {
 
 // ── Skill card data ──
 
+// Clicking a card seeds the prompt bar — no separate pages, everything happens
+// on the canvas via the Agent.
 const skillCards = [
   {
     title: "STORY ANIME",
     subtitle: "Anime-style storytelling",
     bg: "bg-gradient-to-br from-[#2a1a2e] to-[#1a0a1e]",
     accent: "border-pink-500/30",
-    href: "/script",
+    preset: "An anime-style short story about ",
   },
   {
     title: "CHARACTER DESIGN",
     subtitle: "Original character creation",
     bg: "bg-gradient-to-br from-[#2a2a10] to-[#1a1a08]",
     accent: "border-yellow-500/30",
-    href: "/character",
+    preset: "A story starring an original character: ",
   },
   {
     title: "SCENE DESIGN",
     subtitle: "Environment & background",
     bg: "bg-gradient-to-br from-[#0a2a2a] to-[#081a1a]",
     accent: "border-cyan-500/30",
-    href: "/scene",
+    preset: "A cinematic short set in ",
   },
   {
     title: "ITEM DESIGN",
     subtitle: "Props & object design",
     bg: "bg-gradient-to-br from-[#0a0a2e] to-[#08081e]",
     accent: "border-indigo-500/30",
-    href: "/image-gen",
+    preset: "A short showcasing a product/item: ",
   },
   {
     title: "PRODUCT AD",
     subtitle: "Commercial advertising",
     bg: "bg-gradient-to-br from-[#2e0a2a] to-[#1e081a]",
     accent: "border-pink-400/30",
-    href: "/image-gen",
+    preset: "A short product advertisement for ",
   },
 ];
 
@@ -864,9 +866,6 @@ export default function WorkspacePage() {
   const toolbarAction = useCallback(
     (label: string) => {
       switch (label) {
-        case "Script":
-          router.push("/script");
-          break;
         case "Skill":
           setShowSkills((v) => !v);
           break;
@@ -898,7 +897,7 @@ export default function WorkspacePage() {
             viewBox="0 0 24 24"
             className="h-5 w-5 text-white cursor-pointer"
             fill="currentColor"
-            onClick={() => router.push("/home")}
+            onClick={() => router.push("/gallery")}
           >
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
           </svg>
@@ -1142,7 +1141,10 @@ export default function WorkspacePage() {
             {skillCards.map((card) => (
               <button
                 key={card.title}
-                onClick={() => router.push(card.href)}
+                onClick={() => {
+                  setPrompt(card.preset);
+                  setShowSkills(false);
+                }}
                 className={`flex h-[140px] w-[110px] shrink-0 flex-col justify-end rounded-xl border ${card.accent} ${card.bg} p-3 text-left transition-transform hover:scale-105`}
               >
                 <span className="text-[10px] font-bold uppercase tracking-wider text-white">
@@ -1156,7 +1158,7 @@ export default function WorkspacePage() {
 
             {/* All Skills link */}
             <button
-              onClick={() => router.push("/home")}
+              onClick={() => router.push("/gallery")}
               className="flex shrink-0 items-center gap-0.5 text-xs text-white/40 hover:text-white/70 transition-colors whitespace-nowrap"
             >
               All Skills <ChevronRight className="h-3 w-3" />
@@ -1290,7 +1292,7 @@ export default function WorkspacePage() {
                   <Plus className="h-3.5 w-3.5" />
                 </button>
                 <span className="mx-1 h-4 w-px bg-white/10" />
-                {["Script", "Skill", "Agent", "Styles", "Assets"].map(
+                {["Skill", "Agent", "Styles", "Assets"].map(
                   (label) => (
                     <button
                       key={label}

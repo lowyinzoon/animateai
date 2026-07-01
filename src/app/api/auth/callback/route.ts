@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/home";
+  const next = searchParams.get("next") ?? "/workspace";
 
   // Use the configured site URL or derive from request headers
   const forwardedHost = request.headers.get("x-forwarded-host");

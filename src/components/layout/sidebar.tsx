@@ -4,32 +4,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
-  Compass,
   Plus,
   FolderOpen,
-  LayoutDashboard,
-  FileText,
   Clapperboard,
   Settings,
-  Trash2,
-  MessageCircle,
-  HelpCircle,
 } from "lucide-react";
 
 const primaryNav = [
-  { href: "/home", label: "Explore", icon: Compass },
   { href: "/workspace", label: "New", icon: Plus },
   { href: "/gallery", label: "Gallery", icon: Clapperboard },
-  { href: "/assets", label: "Projects", icon: FolderOpen },
-  { href: "/canvas", label: "Assets", icon: LayoutDashboard },
-  { href: "/script", label: "Skills", icon: FileText },
+  { href: "/assets", label: "Assets", icon: FolderOpen },
 ];
 
 const bottomNav = [
   { href: "/settings", label: "Settings", icon: Settings },
-  { href: "#", label: "Trash", icon: Trash2 },
-  { href: "#", label: "Discord", icon: MessageCircle },
-  { href: "#", label: "Help", icon: HelpCircle },
 ];
 
 export function Sidebar() {
@@ -39,7 +27,7 @@ export function Sidebar() {
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-[68px] flex-col items-center border-r border-border bg-sidebar py-4">
       {/* Logo */}
       <Link
-        href="/home"
+        href="/workspace"
         className="mb-5 flex h-8 w-8 items-center justify-center"
       >
         <svg viewBox="0 0 24 24" className="h-6 w-6 text-foreground" fill="currentColor">

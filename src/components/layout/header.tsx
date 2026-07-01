@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { LogOut, User, Settings, Menu, Bell, Sparkles, Coins } from "lucide-react";
+import { LogOut, Settings, Menu, Bell, Sparkles } from "lucide-react";
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -59,9 +59,6 @@ export function Header({ onMenuClick }: HeaderProps) {
         {/* Credits + Avatar pill */}
         <DropdownMenu>
           <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border border-border px-2.5 py-1 outline-none transition-colors hover:bg-accent cursor-pointer">
-            <Coins className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-xs font-medium">100</span>
-            <span className="text-[10px] text-muted-foreground">BASE</span>
             <Avatar className="h-6 w-6">
               <AvatarFallback className="bg-muted text-foreground text-[10px]">
                 {initials}
@@ -76,15 +73,6 @@ export function Header({ onMenuClick }: HeaderProps) {
               <p className="text-xs text-muted-foreground">{user?.email}</p>
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                window.location.href = "/profile";
-              }}
-              className="cursor-pointer"
-            >
-              <User className="mr-2 h-4 w-4" />
-              Profile
-            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 window.location.href = "/settings";

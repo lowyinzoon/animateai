@@ -41,16 +41,9 @@ export async function updateSession(request: NextRequest) {
 
   const isDashboardRoute =
     request.nextUrl.pathname.startsWith("/workspace") ||
-    request.nextUrl.pathname.startsWith("/home") ||
-    request.nextUrl.pathname.startsWith("/image-gen") ||
-    request.nextUrl.pathname.startsWith("/video-gen") ||
-    request.nextUrl.pathname.startsWith("/script") ||
-    request.nextUrl.pathname.startsWith("/character") ||
-    request.nextUrl.pathname.startsWith("/scene") ||
-    request.nextUrl.pathname.startsWith("/canvas") ||
-    request.nextUrl.pathname.startsWith("/storyboard") ||
     request.nextUrl.pathname.startsWith("/assets") ||
-    request.nextUrl.pathname.startsWith("/profile");
+    request.nextUrl.pathname.startsWith("/gallery") ||
+    request.nextUrl.pathname.startsWith("/settings");
 
   if (!user && isDashboardRoute) {
     const url = request.nextUrl.clone();
@@ -60,7 +53,7 @@ export async function updateSession(request: NextRequest) {
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone();
-    url.pathname = "/home";
+    url.pathname = "/workspace";
     return NextResponse.redirect(url);
   }
 
