@@ -16,6 +16,7 @@ export async function GET() {
 
     return NextResponse.json({
       openrouter: !!apiKeys.openrouter,
+      openai: !!apiKeys.openai,
       kling: !!apiKeys.kling,
     });
   } catch (error) {
@@ -41,7 +42,7 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const key = searchParams.get("key");
 
-    if (!key || !["openrouter", "kling"].includes(key)) {
+    if (!key || !["openrouter", "openai", "kling"].includes(key)) {
       return NextResponse.json(
         { error: "Invalid key parameter" },
         { status: 400 }

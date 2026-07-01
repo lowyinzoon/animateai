@@ -932,9 +932,6 @@ export default function WorkspacePage() {
           >
             Publish
           </button>
-          <div className="flex items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 py-1">
-            <span className="text-[11px] text-white/60">154 BASE</span>
-          </div>
           <button
             onClick={signOut}
             className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-[11px] font-semibold text-white"

@@ -43,9 +43,11 @@ const DEFAULT_LLM_MODEL = "openai/gpt-4o";
 export default function SettingsPage() {
   const { user, loading } = useAuth();
   const [openrouterKey, setOpenrouterKey] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
   const [klingKey, setKlingKey] = useState("");
   const [llmModel, setLlmModel] = useState(DEFAULT_LLM_MODEL);
   const [showOpenrouter, setShowOpenrouter] = useState(false);
+  const [showOpenai, setShowOpenai] = useState(false);
   const [showKling, setShowKling] = useState(false);
   const [saving, setSaving] = useState(false);
   const supabase = createClient();
@@ -54,6 +56,7 @@ export default function SettingsPage() {
     if (user?.user_metadata?.api_keys) {
       const keys = user.user_metadata.api_keys;
       setOpenrouterKey(keys.openrouter || "");
+      setOpenaiKey(keys.openai || "");
       setKlingKey(keys.kling || "");
       setLlmModel(keys.llm_model || DEFAULT_LLM_MODEL);
     }
@@ -67,6 +70,7 @@ export default function SettingsPage() {
       data: {
         api_keys: {
           openrouter: openrouterKey,
+          openai: openaiKey,
           kling: klingKey,
           llm_model: llmModel,
         },
@@ -105,10 +109,10 @@ export default function SettingsPage() {
               <div>
                 <CardTitle className="flex items-center gap-2">
                   <Key className="h-4 w-4" />
-                  Image & Script Generation
+                  Script & Storyboard
                 </CardTitle>
                 <CardDescription>
-                  OpenRouter API key for image generation, script writing, and
+                  OpenRouter API key for script writing, the agent planner, and
                   storyboard parsing
                 </CardDescription>
               </div>
@@ -153,6 +157,65 @@ export default function SettingsPage() {
                   className="underline hover:text-foreground"
                 >
                   openrouter.ai/keys
+                </a>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="h-4 w-4" />
+                  Image Generation
+                </CardTitle>
+                <CardDescription>
+                  OpenAI API key for image generation and character-consistent
+                  edits (gpt-image-2)
+                </CardDescription>
+              </div>
+              {openaiKey ? (
+                <Badge variant="secondary">Configured</Badge>
+              ) : (
+                <Badge variant="outline">Not set</Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="openai">OpenAI API Key</Label>
+              <div className="relative">
+                <Input
+                  id="openai"
+                  type={showOpenai ? "text" : "password"}
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  placeholder="sk-proj-..."
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOpenai(!showOpenai)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showOpenai ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used for image generation and character lock. Get your key at{" "}
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-foreground"
+                >
+                  platform.openai.com/api-keys
                 </a>
               </p>
             </div>
