@@ -18,6 +18,7 @@ import {
   SendHorizontal,
   Trash2,
   Loader2,
+  Film,
   X,
 } from "lucide-react";
 
@@ -30,6 +31,8 @@ interface WorkspaceFrame {
   width: number;
   height: number;
   imageUrl?: string;
+  videoUrl?: string;
+  animating?: boolean;
   prompt?: string;
   label?: string;
 }
@@ -380,6 +383,68 @@ export default function WorkspacePage() {
     }
   }, [prompt, projectName, createFrame, updateFrame, generateIntoFrame]);
 
+  // ── Animate a shot: image → video (image-to-video via /api/generate-video) ──
+
+  const animateFrame = useCallback(
+    async (frameId: string) => {
+      const frame = frames.find((f) => f.id === frameId);
+      if (!frame?.imageUrl) {
+        toast("Generate an image in this frame first.");
+        return;
+      }
+      if (frame.animating) return;
+
+      updateFrame(frameId, { animating: true });
+      toast("Animating shot…");
+
+      try {
+        const res = await fetch("/api/generate-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: frame.prompt || frame.label || "Animate this shot",
+            image_url: frame.imageUrl,
+            duration: 5,
+            aspect_ratio: "16:9",
+            resolution: "720p",
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to start animation");
+
+        const { task_id, asset_id } = data;
+
+        // Poll until the video task completes (seedance ~1-3 min).
+        const started = Date.now();
+        const MAX_MS = 5 * 60 * 1000;
+        const poll = async (): Promise<void> => {
+          if (Date.now() - started > MAX_MS) {
+            throw new Error("Animation timed out");
+          }
+          const q = new URLSearchParams({ task_id });
+          if (asset_id) q.set("asset_id", asset_id);
+          const r = await fetch(`/api/generate-video?${q.toString()}`);
+          const j = await r.json();
+          if (j.state === "success" && j.video_url) {
+            updateFrame(frameId, { videoUrl: j.video_url, animating: false });
+            toast.success("Shot animated");
+            return;
+          }
+          if (j.state === "fail") {
+            throw new Error(j.fail_msg || "Animation failed");
+          }
+          await new Promise((res) => setTimeout(res, 5000));
+          return poll();
+        };
+        await poll();
+      } catch (err) {
+        updateFrame(frameId, { animating: false });
+        toast.error(err instanceof Error ? err.message : "Animation failed");
+      }
+    },
+    [frames, updateFrame]
+  );
+
   // ── Canvas event handlers ──
 
   const handleCanvasDoubleClick = useCallback(
@@ -699,7 +764,16 @@ export default function WorkspacePage() {
                   }}
                 >
                   {/* Content */}
-                  {frame.imageUrl ? (
+                  {frame.videoUrl ? (
+                    <video
+                      src={frame.videoUrl}
+                      className="h-full w-full rounded-md object-cover pointer-events-none"
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                    />
+                  ) : frame.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={frame.imageUrl}
@@ -716,6 +790,14 @@ export default function WorkspacePage() {
                     </div>
                   )}
 
+                  {/* Animating overlay */}
+                  {frame.animating && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-md bg-black/60 pointer-events-none">
+                      <Loader2 className="h-5 w-5 animate-spin text-pink-400" />
+                      <span className="text-[10px] text-white/70">Animating…</span>
+                    </div>
+                  )}
+
                   {/* Label bar */}
                   {frame.label && (
                     <div className="absolute bottom-0 left-0 right-0 rounded-b-md bg-black/70 px-2 py-1 text-[10px] text-white/70 truncate">
@@ -726,6 +808,25 @@ export default function WorkspacePage() {
                   {/* Selected controls */}
                   {isSelected && (
                     <>
+                      {/* Animate button — only when there's an image to animate */}
+                      {frame.imageUrl && !frame.videoUrl && (
+                        <button
+                          className="absolute -top-3 -left-3 flex h-6 w-6 items-center justify-center rounded-full bg-pink-600 text-white hover:bg-pink-500 z-10 disabled:opacity-50"
+                          title="Animate this shot"
+                          disabled={frame.animating}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            animateFrame(frame.id);
+                          }}
+                        >
+                          {frame.animating ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Film className="h-3 w-3" />
+                          )}
+                        </button>
+                      )}
+
                       {/* Delete button */}
                       <button
                         className="absolute -top-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 z-10"
@@ -856,6 +957,16 @@ export default function WorkspacePage() {
                   }}
                 >
                   <Sparkles className="h-3 w-3" /> Generate Image
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06] disabled:opacity-40"
+                  disabled={!frames.find((f) => f.id === contextMenu.frameId)?.imageUrl}
+                  onClick={() => {
+                    animateFrame(contextMenu.frameId!);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Film className="h-3 w-3" /> Animate Frame
                 </button>
                 <button
                   className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-white/[0.06]"
