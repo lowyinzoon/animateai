@@ -120,6 +120,7 @@ export default function WorkspacePage() {
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  const [filmUrl, setFilmUrl] = useState<string | null>(null);
   const [showSkills, setShowSkills] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
@@ -397,18 +398,12 @@ export default function WorkspacePage() {
 
   // ── Animate a shot: image → video (image-to-video via /api/generate-video) ──
 
-  const animateFrame = useCallback(
-    async (frameId: string) => {
-      const frame = frames.find((f) => f.id === frameId);
-      if (!frame?.imageUrl) {
-        toast("Generate an image in this frame first.");
-        return;
-      }
-      if (frame.animating) return;
-
-      updateFrame(frameId, { animating: true });
-      toast("Animating shot…");
-
+  // Core: animate a single frame, returning the resulting video URL (or null).
+  const animateOne = useCallback(
+    async (frame: WorkspaceFrame): Promise<string | null> => {
+      if (!frame.imageUrl) return null;
+      if (frame.videoUrl) return frame.videoUrl;
+      updateFrame(frame.id, { animating: true });
       try {
         const res = await fetch("/api/generate-video", {
           method: "POST",
@@ -425,37 +420,94 @@ export default function WorkspacePage() {
         if (!res.ok) throw new Error(data.error || "Failed to start animation");
 
         const { task_id, asset_id } = data;
-
-        // Poll until the video task completes (seedance ~1-3 min).
         const started = Date.now();
         const MAX_MS = 5 * 60 * 1000;
-        const poll = async (): Promise<void> => {
-          if (Date.now() - started > MAX_MS) {
-            throw new Error("Animation timed out");
-          }
+        // Poll until the video task completes (seedance ~1-3 min).
+        for (;;) {
+          if (Date.now() - started > MAX_MS) throw new Error("Animation timed out");
           const q = new URLSearchParams({ task_id });
           if (asset_id) q.set("asset_id", asset_id);
           const r = await fetch(`/api/generate-video?${q.toString()}`);
           const j = await r.json();
           if (j.state === "success" && j.video_url) {
-            updateFrame(frameId, { videoUrl: j.video_url, animating: false });
-            toast.success("Shot animated");
-            return;
+            updateFrame(frame.id, { videoUrl: j.video_url, animating: false });
+            return j.video_url as string;
           }
-          if (j.state === "fail") {
-            throw new Error(j.fail_msg || "Animation failed");
-          }
-          await new Promise((res) => setTimeout(res, 5000));
-          return poll();
-        };
-        await poll();
+          if (j.state === "fail") throw new Error(j.fail_msg || "Animation failed");
+          await new Promise((r2) => setTimeout(r2, 5000));
+        }
       } catch (err) {
-        updateFrame(frameId, { animating: false });
+        updateFrame(frame.id, { animating: false });
         toast.error(err instanceof Error ? err.message : "Animation failed");
+        return null;
       }
     },
-    [frames, updateFrame]
+    [updateFrame]
   );
+
+  const animateFrame = useCallback(
+    async (frameId: string) => {
+      const frame = frames.find((f) => f.id === frameId);
+      if (!frame?.imageUrl) {
+        toast("Generate an image in this frame first.");
+        return;
+      }
+      if (frame.animating) return;
+      toast("Animating shot…");
+      const url = await animateOne(frame);
+      if (url) toast.success("Shot animated");
+    },
+    [frames, animateOne]
+  );
+
+  // ── Assemble Film: animate every shot, then stitch into one video ──
+
+  const handleAssembleFilm = useCallback(async () => {
+    // Collect shot frames in order (Agent labels them "Shot N"; skip the ★ character sheet).
+    const shots = frames
+      .filter((f) => f.imageUrl && !(f.label ?? "").startsWith("★"))
+      .sort((a, b) => {
+        const na = parseInt((a.label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
+        const nb = parseInt((b.label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+        return a.y - b.y || a.x - b.x;
+      });
+
+    if (shots.length === 0) {
+      toast("Generate some shots first — run the Agent.");
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      // 1) Ensure every shot has a video clip (animate the ones that don't).
+      const urls: string[] = [];
+      for (let i = 0; i < shots.length; i++) {
+        setAgentStatus(`Animating shot ${i + 1} of ${shots.length}…`);
+        const url = await animateOne(shots[i]);
+        if (url) urls.push(url);
+      }
+      if (urls.length === 0) throw new Error("No clips were produced");
+
+      // 2) Stitch clips into a single film server-side.
+      setAgentStatus(`Assembling ${urls.length} shots into your film…`);
+      const res = await fetch("/api/compose-film", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_urls: urls, title: projectName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Film assembly failed");
+
+      setFilmUrl(data.film_url);
+      toast.success("Your film is ready 🎬");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Film assembly failed");
+    } finally {
+      setIsGenerating(false);
+      setAgentStatus(null);
+    }
+  }, [frames, projectName, animateOne]);
 
   // ── Canvas event handlers ──
 
@@ -710,6 +762,15 @@ export default function WorkspacePage() {
 
         {/* Right */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleAssembleFilm}
+            disabled={isGenerating}
+            className="flex items-center gap-1.5 rounded-md bg-pink-600 px-3 py-1 text-xs font-medium text-white hover:bg-pink-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Animate every shot and stitch them into one film"
+          >
+            <Film className="h-3.5 w-3.5" />
+            Assemble Film
+          </button>
           <button className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/5 transition-colors">
             Publish
           </button>
@@ -1101,6 +1162,52 @@ export default function WorkspacePage() {
           </div>
         </div>
       </div>
+
+      {/* ── Finished Film modal ── */}
+      {filmUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setFilmUrl(null)}
+        >
+          <div
+            className="w-full max-w-3xl rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-medium text-white">
+                <Film className="h-4 w-4 text-pink-400" /> {projectName}
+              </span>
+              <button
+                onClick={() => setFilmUrl(null)}
+                className="text-white/50 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <video
+              src={filmUrl}
+              controls
+              autoPlay
+              className="w-full rounded-lg bg-black"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <a
+                href={filmUrl}
+                download
+                className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-white/80 hover:bg-white/5"
+              >
+                Download
+              </a>
+              <button
+                onClick={() => setFilmUrl(null)}
+                className="rounded-md bg-pink-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-pink-500"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
