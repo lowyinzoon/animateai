@@ -64,6 +64,43 @@ interface ResizeState {
   origY: number;
 }
 
+// ── Agent plan (dialogue/approval mode) ──
+
+interface PlanShot {
+  id: string;
+  scene_description: string;
+  dialogue: string;
+  shot_type: string;
+  image_prompt: string;
+}
+
+interface PlanDraft {
+  title: string;
+  logline: string;
+  style_preset: string;
+  characterName: string;
+  appearance: string;
+  shots: PlanShot[];
+}
+
+interface AgentLogItem {
+  agent: string;
+  text: string;
+}
+
+// Recompose a shot's final image prompt from the (possibly edited) plan — mirrors
+// composePanelPrompt() on the server so edits in the review panel take effect.
+function composeShotPrompt(plan: PlanDraft, shot: PlanShot): string {
+  return [
+    shot.image_prompt,
+    plan.appearance ? `Character (${plan.characterName}): ${plan.appearance}` : "",
+    `${shot.shot_type.replace(/-/g, " ")} shot`,
+    plan.style_preset ? `${plan.style_preset} style` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+}
+
 // ── Skill card data ──
 
 const skillCards = [
@@ -121,6 +158,8 @@ export default function WorkspacePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [filmUrl, setFilmUrl] = useState<string | null>(null);
+  const [planDraft, setPlanDraft] = useState<PlanDraft | null>(null);
+  const [agentLog, setAgentLog] = useState<AgentLogItem[]>([]);
   const [showSkills, setShowSkills] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
@@ -326,17 +365,18 @@ export default function WorkspacePage() {
     [updateFrame]
   );
 
-  const handleAgentRun = useCallback(async () => {
+  // Step 1 — the agent team drafts a plan for review (no credits spent yet).
+  const handleAgentPlan = useCallback(async () => {
     const idea = prompt.trim();
     if (!idea) {
       toast("Type your story idea first, then run the Agent.");
       return;
     }
     setIsGenerating(true);
-    setAgentStatus("Directing your story…");
+    setAgentStatus("The agent team is planning your story…");
+    setAgentLog([]);
 
     try {
-      // 1) Plan the whole short from a single idea.
       const res = await fetch("/api/orchestrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -347,54 +387,106 @@ export default function WorkspacePage() {
 
       const plan = data.plan as {
         title: string;
+        logline: string;
+        style_preset: string;
         character: { name: string; appearance_prompt: string };
-        panels: Array<{ id: string; final_prompt: string; scene_description: string }>;
+        panels: Array<{
+          id: string;
+          scene_description: string;
+          dialogue: string;
+          shot_type: string;
+          image_prompt: string;
+        }>;
       };
 
-      setProjectName(plan.title || projectName);
-      setShowSkills(false);
-      setPrompt("");
+      const draft: PlanDraft = {
+        title: plan.title || "Untitled",
+        logline: plan.logline || "",
+        style_preset: plan.style_preset || "anime",
+        characterName: plan.character?.name || "Main Character",
+        appearance: plan.character?.appearance_prompt || "",
+        shots: plan.panels.map((p) => ({
+          id: p.id,
+          scene_description: p.scene_description || "",
+          dialogue: p.dialogue || "",
+          shot_type: p.shot_type || "medium",
+          image_prompt: p.image_prompt || p.scene_description || "",
+        })),
+      };
 
-      // 2) Lay out a character sheet frame + one frame per panel in a grid.
-      const COL = 3;
-      const STEP = 320;
+      // Show what each specialist contributed (the "visible agent team").
+      setAgentLog([
+        { agent: "Art Director", text: `Set the visual style: ${draft.style_preset}.` },
+        { agent: "Scriptwriter", text: `"${draft.logline}" — ${draft.shots.length} shots.` },
+        { agent: "Character Designer", text: `Locked character: ${draft.characterName}.` },
+        { agent: "Storyboard Artist", text: `Laid out ${draft.shots.length} shots with camera framing.` },
+        { agent: "Sound Director", text: `Will score the film when you assemble it.` },
+      ]);
 
-      // Character frame (locked reference) on the left.
-      const charFrame = createFrame(-STEP * 1.4, 0);
-      updateFrame(charFrame.id, { label: `★ ${plan.character.name}` });
-
-      const panelFrames = plan.panels.map((panel, i) => {
-        const col = i % COL;
-        const row = Math.floor(i / COL);
-        const f = createFrame(col * STEP, (row - 0.5) * STEP);
-        updateFrame(f.id, { label: `Shot ${i + 1}` });
-        return { frameId: f.id, panel };
-      });
-
-      // 3) Render the locked character first, then feed that image as a visual
-      //    reference into every shot so the character stays consistent.
-      setAgentStatus(`Designing ${plan.character.name}…`);
-      const characterUrl = await generateIntoFrame(
-        charFrame.id,
-        `Character reference sheet, full body, neutral pose, clean background. ${plan.character.appearance_prompt}`,
-        `★ ${plan.character.name}`
-      );
-      const characterRefs = characterUrl ? [characterUrl] : undefined;
-
-      for (let i = 0; i < panelFrames.length; i++) {
-        const { frameId, panel } = panelFrames[i];
-        setAgentStatus(`Rendering shot ${i + 1} of ${panelFrames.length}…`);
-        await generateIntoFrame(frameId, panel.final_prompt, `Shot ${i + 1}`, characterRefs);
-      }
-
-      toast.success(`"${plan.title}" — ${panelFrames.length} shots generated`);
+      setPlanDraft(draft);
+      setProjectName(draft.title);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Agent failed");
     } finally {
       setIsGenerating(false);
       setAgentStatus(null);
     }
-  }, [prompt, projectName, createFrame, updateFrame, generateIntoFrame]);
+  }, [prompt]);
+
+  // Step 2 — user approved the (possibly edited) plan: generate it on the canvas.
+  const handleApprovePlan = useCallback(async () => {
+    if (!planDraft) return;
+    const plan = planDraft;
+    const shots = plan.shots.filter((s) => s.image_prompt.trim());
+    if (shots.length === 0) {
+      toast("Add at least one shot before generating.");
+      return;
+    }
+
+    setPlanDraft(null);
+    setShowSkills(false);
+    setPrompt("");
+    setIsGenerating(true);
+
+    try {
+      // Lay out a character sheet frame + one frame per shot in a grid.
+      const COL = 3;
+      const STEP = 320;
+
+      const charFrame = createFrame(-STEP * 1.4, 0);
+      updateFrame(charFrame.id, { label: `★ ${plan.characterName}` });
+
+      const shotFrames = shots.map((shot, i) => {
+        const col = i % COL;
+        const row = Math.floor(i / COL);
+        const f = createFrame(col * STEP, (row - 0.5) * STEP);
+        updateFrame(f.id, { label: `Shot ${i + 1}` });
+        return { frameId: f.id, shot };
+      });
+
+      // Render the locked character first, then feed that image into every shot.
+      setAgentStatus(`Designing ${plan.characterName}…`);
+      const characterUrl = await generateIntoFrame(
+        charFrame.id,
+        `Character reference sheet, full body, neutral pose, clean background. ${plan.appearance}`,
+        `★ ${plan.characterName}`
+      );
+      const characterRefs = characterUrl ? [characterUrl] : undefined;
+
+      for (let i = 0; i < shotFrames.length; i++) {
+        const { frameId, shot } = shotFrames[i];
+        setAgentStatus(`Rendering shot ${i + 1} of ${shotFrames.length}…`);
+        await generateIntoFrame(frameId, composeShotPrompt(plan, shot), `Shot ${i + 1}`, characterRefs);
+      }
+
+      toast.success(`"${plan.title}" — ${shotFrames.length} shots generated`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setIsGenerating(false);
+      setAgentStatus(null);
+    }
+  }, [planDraft, createFrame, updateFrame, generateIntoFrame]);
 
   // ── Animate a shot: image → video (image-to-video via /api/generate-video) ──
 
@@ -754,7 +846,7 @@ export default function WorkspacePage() {
           setShowSkills((v) => !v);
           break;
         case "Agent":
-          handleAgentRun();
+          handleAgentPlan();
           break;
         case "Styles":
           toast("Styles — coming soon");
@@ -764,7 +856,7 @@ export default function WorkspacePage() {
           break;
       }
     },
-    [router, handleAgentRun]
+    [router, handleAgentPlan]
   );
 
   // ── Render ──
@@ -1200,6 +1292,124 @@ export default function WorkspacePage() {
           </div>
         </div>
       </div>
+
+      {/* ── Agent plan review panel (dialogue / approval mode) ── */}
+      {planDraft && (
+        <div className="fixed right-3 top-16 bottom-24 z-40 flex w-[360px] flex-col rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] shadow-2xl">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <span className="flex items-center gap-2 text-sm font-semibold text-white">
+              <Sparkles className="h-4 w-4 text-pink-400" /> Review plan
+            </span>
+            <button
+              onClick={() => setPlanDraft(null)}
+              className="text-white/50 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+            {/* Agent activity */}
+            <div className="space-y-1.5">
+              {agentLog.map((item, i) => (
+                <div key={i} className="rounded-lg bg-white/[0.04] px-3 py-1.5">
+                  <div className="text-[10px] font-semibold text-pink-400">{item.agent}</div>
+                  <div className="text-[11px] text-white/70">{item.text}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Title */}
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-white/40">Title</span>
+              <input
+                value={planDraft.title}
+                onChange={(e) => setPlanDraft((p) => (p ? { ...p, title: e.target.value } : p))}
+                className="mt-1 w-full rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-sm text-white outline-none focus:border-pink-500/50"
+              />
+            </label>
+
+            {/* Character */}
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-wide text-white/40">
+                Character — {planDraft.characterName}
+              </span>
+              <textarea
+                value={planDraft.appearance}
+                onChange={(e) =>
+                  setPlanDraft((p) => (p ? { ...p, appearance: e.target.value } : p))
+                }
+                rows={3}
+                className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/90 outline-none focus:border-pink-500/50"
+              />
+            </label>
+
+            {/* Shots */}
+            <div>
+              <span className="text-[10px] uppercase tracking-wide text-white/40">
+                Shots ({planDraft.shots.length})
+              </span>
+              <div className="mt-1.5 space-y-2">
+                {planDraft.shots.map((shot, i) => (
+                  <div key={shot.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-[10px] font-medium text-white/60">
+                        Shot {i + 1} · {shot.shot_type.replace(/-/g, " ")}
+                      </span>
+                      <button
+                        onClick={() =>
+                          setPlanDraft((p) =>
+                            p ? { ...p, shots: p.shots.filter((s) => s.id !== shot.id) } : p
+                          )
+                        }
+                        className="text-white/30 hover:text-red-400"
+                        title="Remove shot"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <textarea
+                      value={shot.image_prompt}
+                      onChange={(e) =>
+                        setPlanDraft((p) =>
+                          p
+                            ? {
+                                ...p,
+                                shots: p.shots.map((s) =>
+                                  s.id === shot.id ? { ...s, image_prompt: e.target.value } : s
+                                ),
+                              }
+                            : p
+                        )
+                      }
+                      rows={2}
+                      className="w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-white/90 outline-none focus:border-pink-500/50"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
+            <button
+              onClick={() => setPlanDraft(null)}
+              className="flex-1 rounded-md border border-white/10 py-2 text-xs text-white/70 hover:bg-white/5"
+            >
+              Discard
+            </button>
+            <button
+              onClick={handleApprovePlan}
+              disabled={isGenerating}
+              className="flex flex-[2] items-center justify-center gap-1.5 rounded-md bg-pink-600 py-2 text-xs font-semibold text-white hover:bg-pink-500 disabled:opacity-40"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Generate storyboard
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Finished Film modal ── */}
       {filmUrl && (
