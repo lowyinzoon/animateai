@@ -480,6 +480,23 @@ export default function WorkspacePage() {
 
     setIsGenerating(true);
     try {
+      // 0) Kick off the score in parallel (best-effort — film still assembles without it).
+      let musicTaskId: string | null = null;
+      try {
+        const mres = await fetch("/api/generate-music", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: `Instrumental cinematic background score for an animated short titled "${projectName}". Emotive, atmospheric, no vocals.`,
+            instrumental: true,
+          }),
+        });
+        const md = await mres.json();
+        if (mres.ok) musicTaskId = md.task_id;
+      } catch {
+        /* music is optional */
+      }
+
       // 1) Ensure every shot has a video clip (animate the ones that don't).
       const urls: string[] = [];
       for (let i = 0; i < shots.length; i++) {
@@ -489,12 +506,33 @@ export default function WorkspacePage() {
       }
       if (urls.length === 0) throw new Error("No clips were produced");
 
-      // 2) Stitch clips into a single film server-side.
+      // 2) Wait for the score (usually done by now; give it up to ~3 min).
+      let audioUrl: string | undefined;
+      if (musicTaskId) {
+        setAgentStatus("Scoring the music…");
+        const started = Date.now();
+        while (Date.now() - started < 3 * 60 * 1000) {
+          try {
+            const r = await fetch(`/api/generate-music?task_id=${musicTaskId}`);
+            const j = await r.json();
+            if (j.state === "success" && j.audio_url) {
+              audioUrl = j.audio_url;
+              break;
+            }
+            if (j.state === "fail") break;
+          } catch {
+            break;
+          }
+          await new Promise((r2) => setTimeout(r2, 5000));
+        }
+      }
+
+      // 3) Stitch clips (+ score) into a single film server-side.
       setAgentStatus(`Assembling ${urls.length} shots into your film…`);
       const res = await fetch("/api/compose-film", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ video_urls: urls, title: projectName }),
+        body: JSON.stringify({ video_urls: urls, title: projectName, audio_url: audioUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Film assembly failed");
