@@ -923,9 +923,10 @@ export default function WorkspacePage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => router.push("/gallery")}
-            className="flex h-7 items-center rounded-lg bg-pink-600 px-2.5 text-sm font-bold text-white hover:bg-pink-500 transition-colors"
+            title="Gallery"
+            className="flex h-7 w-7 items-center justify-center rounded-lg bg-pink-600 text-white hover:bg-pink-500 transition-colors"
           >
-            Oii
+            <Sparkles className="h-4 w-4" />
           </button>
           <input
             value={projectName}
