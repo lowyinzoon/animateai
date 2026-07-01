@@ -19,6 +19,7 @@ import {
   Trash2,
   Loader2,
   Film,
+  Maximize2,
   X,
 } from "lucide-react";
 
@@ -35,6 +36,8 @@ interface WorkspaceFrame {
   animating?: boolean;
   prompt?: string;
   label?: string;
+  /** id of the upstream frame this one flows from — draws a dotted connector. */
+  parentId?: string;
 }
 
 interface ContextMenu {
@@ -451,18 +454,18 @@ export default function WorkspacePage() {
     setIsGenerating(true);
 
     try {
-      // Lay out a character sheet frame + one frame per shot in a grid.
-      const COL = 3;
-      const STEP = 320;
+      // Lay out a connected vertical flow: character → shot → shot …, each linked
+      // to the previous so the canvas draws a dotted spine (oiioii-style).
+      const VSTEP = 340;
 
-      const charFrame = createFrame(-STEP * 1.4, 0);
+      const charFrame = createFrame(0, 0);
       updateFrame(charFrame.id, { label: `★ ${plan.characterName}` });
 
+      let prevId = charFrame.id;
       const shotFrames = shots.map((shot, i) => {
-        const col = i % COL;
-        const row = Math.floor(i / COL);
-        const f = createFrame(col * STEP, (row - 0.5) * STEP);
-        updateFrame(f.id, { label: `Shot ${i + 1}` });
+        const f = createFrame(0, (i + 1) * VSTEP);
+        updateFrame(f.id, { label: `Shot ${i + 1}`, parentId: prevId });
+        prevId = f.id;
         return { frameId: f.id, shot };
       });
 
@@ -887,20 +890,43 @@ export default function WorkspacePage() {
 
   const scale = zoom / 100;
 
+  // Center the view on a frame (used by the top pipeline tabs).
+  const centerOnFrame = (f: WorkspaceFrame, z: number = zoom) => {
+    const s = z / 100;
+    setPanOffset({ x: -(f.x + f.width / 2) * s, y: -(f.y + f.height / 2) * s });
+  };
+  const focusStage = (stage: string) => {
+    if (frames.length === 0) return;
+    if (stage === "总览") {
+      setZoom(45);
+      const minY = Math.min(...frames.map((f) => f.y));
+      const maxY = Math.max(...frames.map((f) => f.y + f.height));
+      setPanOffset({ x: 0, y: -(((minY + maxY) / 2) * 0.45) });
+      return;
+    }
+    const first = (pred: (l: string) => boolean) => frames.find((f) => pred(f.label ?? ""));
+    const target =
+      stage === "角色"
+        ? first((l) => l.startsWith("★"))
+        : stage === "视频"
+        ? [...frames].reverse().find((f) => (f.label ?? "").startsWith("Shot"))
+        : first((l) => l.startsWith("Shot")) ?? frames[0];
+    if (target) centerOnFrame(target);
+  };
+  const PIPELINE_TABS = ["总览", "剧本", "角色", "场景", "分镜", "视频"];
+
   return (
     <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[oklch(0.08_0_0)]">
       {/* ── Top Bar ── */}
       <header className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[oklch(0.10_0_0)] px-3">
         {/* Left */}
         <div className="flex items-center gap-2">
-          <svg
-            viewBox="0 0 24 24"
-            className="h-5 w-5 text-white cursor-pointer"
-            fill="currentColor"
+          <button
             onClick={() => router.push("/gallery")}
+            className="flex h-7 items-center rounded-lg bg-pink-600 px-2.5 text-sm font-bold text-white hover:bg-pink-500 transition-colors"
           >
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-          </svg>
+            Oii
+          </button>
           <input
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
@@ -912,6 +938,20 @@ export default function WorkspacePage() {
           <button className="text-white/40 hover:text-white/70 transition-colors">
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
+        </div>
+
+        {/* Center — pipeline stage tabs */}
+        <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-5 md:flex">
+          {PIPELINE_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => focusStage(tab)}
+              className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors"
+            >
+              <span className="h-1 w-1 rounded-full bg-pink-500/70" />
+              {tab}
+            </button>
+          ))}
         </div>
 
         {/* Right */}
@@ -965,6 +1005,35 @@ export default function WorkspacePage() {
               transformOrigin: "0 0",
             }}
           >
+            {/* Flow connectors — dotted curves from each node to its parent */}
+            <svg
+              style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}
+              width={1}
+              height={1}
+            >
+              {frames.map((f) => {
+                if (!f.parentId) return null;
+                const p = frames.find((x) => x.id === f.parentId);
+                if (!p) return null;
+                const x1 = p.x + p.width / 2;
+                const y1 = p.y + p.height;
+                const x2 = f.x + f.width / 2;
+                const y2 = f.y;
+                const midY = (y1 + y2) / 2;
+                return (
+                  <path
+                    key={`edge-${f.id}`}
+                    d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                    fill="none"
+                    stroke="rgba(255,255,255,0.35)"
+                    strokeWidth={2}
+                    strokeDasharray="2 7"
+                    strokeLinecap="round"
+                  />
+                );
+              })}
+            </svg>
+
             {/* Frames */}
             {frames.map((frame) => {
               const isSelected = frame.id === selectedFrameId;
@@ -1224,12 +1293,32 @@ export default function WorkspacePage() {
 
         {/* Right-edge floating tools */}
         <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-10">
+          <button
+            onClick={() => createFrame(0, 0)}
+            title="Add frame"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-pink-600 text-white shadow-lg hover:bg-pink-500 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
           <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 transition-colors">
             <Grid3X3 className="h-3.5 w-3.5" />
           </button>
           <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 transition-colors">
             <MousePointer2 className="h-3.5 w-3.5" />
           </button>
+        </div>
+
+        {/* Bottom-right task list */}
+        <div className="absolute bottom-32 right-3 z-10 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5">
+          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-[9px] text-white/70">
+            ✓
+          </div>
+          <div className="leading-tight">
+            <div className="text-[11px] font-medium text-white/80">任务列表</div>
+            <div className="text-[10px] text-white/40">
+              {agentStatus || (isGenerating ? "生成中…" : "当前无任务")}
+            </div>
+          </div>
         </div>
 
         {/* Bottom-right zoom controls */}
@@ -1262,61 +1351,61 @@ export default function WorkspacePage() {
         </div>
       </main>
 
-      {/* ── Bottom Prompt Bar ── */}
-      <div className="relative z-20 flex shrink-0 justify-center border-t border-white/[0.06] bg-[oklch(0.10_0_0)] px-4 py-3">
-        <div className="w-full max-w-[640px]">
-          <div className="rounded-xl border border-white/10 bg-white/[0.04]">
-            {/* Textarea */}
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  handleGenerate();
-                }
-              }}
-              placeholder="Drag / Paste an image here to try Skills, Styles & Assets."
-              rows={2}
-              className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-white outline-none placeholder:text-white/30"
-            />
+      {/* ── Oii Agent dock (bottom-left, floating) ── */}
+      <div className="absolute bottom-4 left-4 z-30 w-[340px] rounded-xl border border-white/10 bg-[oklch(0.11_0_0)]/95 shadow-2xl backdrop-blur-sm">
+        {/* Dock header */}
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
+            <Sparkles className="h-3.5 w-3.5 text-pink-400" /> Oii Agent
+          </span>
+          <button
+            onClick={() => setShowSkills((v) => !v)}
+            className="text-white/40 hover:text-white/70 transition-colors"
+            title="Toggle skills"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
 
-            {/* Toolbar row */}
-            <div className="flex items-center justify-between px-3 pb-2">
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => createFrame(0, 0)}
-                  className="rounded-md p-1.5 text-white/40 hover:bg-white/[0.06] hover:text-white/70 transition-colors"
-                  title="Add frame"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-                <span className="mx-1 h-4 w-px bg-white/10" />
-                {["Skill", "Agent", "Styles", "Assets"].map(
-                  (label) => (
-                    <button
-                      key={label}
-                      onClick={() => toolbarAction(label)}
-                      className="rounded-md px-2 py-1 text-[11px] text-white/40 hover:bg-white/[0.06] hover:text-white/70 transition-colors"
-                    >
-                      {label}
-                    </button>
-                  )
-                )}
-              </div>
+        {/* Textarea */}
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              handleGenerate();
+            }
+          }}
+          placeholder="拖拽 / 粘贴 🖼 图片到这，或描述你的故事…"
+          rows={2}
+          className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-white outline-none placeholder:text-white/30"
+        />
+
+        {/* Toolbar row */}
+        <div className="flex items-center justify-between px-3 pb-2">
+          <div className="flex items-center gap-0.5">
+            {["Skill", "Agent", "Styles", "Assets"].map((label) => (
               <button
-                onClick={handleGenerate}
-                disabled={isGenerating || !prompt.trim()}
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-white hover:bg-pink-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                key={label}
+                onClick={() => toolbarAction(label)}
+                className="rounded-md px-1.5 py-1 text-[11px] text-white/40 hover:bg-white/[0.06] hover:text-white/70 transition-colors"
               >
-                {isGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <SendHorizontal className="h-3.5 w-3.5" />
-                )}
+                {label}
               </button>
-            </div>
+            ))}
           </div>
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || !prompt.trim()}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-white hover:bg-pink-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isGenerating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <SendHorizontal className="h-3.5 w-3.5" />
+            )}
+          </button>
         </div>
       </div>
 
