@@ -6,69 +6,35 @@ import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import {
+  ReactFlow,
+  ReactFlowProvider,
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  useReactFlow,
+  type Node,
+  type Edge,
+  type Connection,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import {
   Share2,
   MoreHorizontal,
   Plus,
   Sparkles,
-  Grid3X3,
-  MousePointer2,
-  Search,
-  Minus,
-  ChevronRight,
   SendHorizontal,
-  Trash2,
   Loader2,
   Film,
   Maximize2,
   X,
 } from "lucide-react";
+import { FrameNode, FrameActionsContext, type FrameData } from "@/components/workspace/frame-node";
 
-// ── Types ──
-
-interface WorkspaceFrame {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  imageUrl?: string;
-  videoUrl?: string;
-  animating?: boolean;
-  prompt?: string;
-  label?: string;
-  /** id of the upstream frame this one flows from — draws a dotted connector. */
-  parentId?: string;
-}
-
-interface ContextMenu {
-  x: number;
-  y: number;
-  canvasX: number;
-  canvasY: number;
-  frameId?: string;
-}
-
-interface DragState {
-  frameId: string;
-  startX: number;
-  startY: number;
-  origX: number;
-  origY: number;
-}
-
-interface ResizeState {
-  frameId: string;
-  edge: string;
-  startX: number;
-  startY: number;
-  origW: number;
-  origH: number;
-  origX: number;
-  origY: number;
-}
-
-// ── Agent plan (dialogue/approval mode) ──
-
+// ── Plan (dialogue/approval) types ──
 interface PlanShot {
   id: string;
   scene_description: string;
@@ -76,7 +42,6 @@ interface PlanShot {
   shot_type: string;
   image_prompt: string;
 }
-
 interface PlanDraft {
   title: string;
   logline: string;
@@ -85,14 +50,11 @@ interface PlanDraft {
   appearance: string;
   shots: PlanShot[];
 }
-
 interface AgentLogItem {
   agent: string;
   text: string;
 }
 
-// Recompose a shot's final image prompt from the (possibly edited) plan — mirrors
-// composePanelPrompt() on the server so edits in the review panel take effect.
 function composeShotPrompt(plan: PlanDraft, shot: PlanShot): string {
   return [
     shot.image_prompt,
@@ -104,62 +66,30 @@ function composeShotPrompt(plan: PlanDraft, shot: PlanShot): string {
     .join(". ");
 }
 
-// ── Skill card data ──
-
-// Clicking a card seeds the prompt bar — no separate pages, everything happens
-// on the canvas via the Agent.
 const skillCards = [
-  {
-    title: "STORY ANIME",
-    subtitle: "Anime-style storytelling",
-    bg: "bg-gradient-to-br from-[#2a1a2e] to-[#1a0a1e]",
-    accent: "border-pink-500/30",
-    preset: "An anime-style short story about ",
-  },
-  {
-    title: "CHARACTER DESIGN",
-    subtitle: "Original character creation",
-    bg: "bg-gradient-to-br from-[#2a2a10] to-[#1a1a08]",
-    accent: "border-yellow-500/30",
-    preset: "A story starring an original character: ",
-  },
-  {
-    title: "SCENE DESIGN",
-    subtitle: "Environment & background",
-    bg: "bg-gradient-to-br from-[#0a2a2a] to-[#081a1a]",
-    accent: "border-cyan-500/30",
-    preset: "A cinematic short set in ",
-  },
-  {
-    title: "ITEM DESIGN",
-    subtitle: "Props & object design",
-    bg: "bg-gradient-to-br from-[#0a0a2e] to-[#08081e]",
-    accent: "border-indigo-500/30",
-    preset: "A short showcasing a product/item: ",
-  },
-  {
-    title: "PRODUCT AD",
-    subtitle: "Commercial advertising",
-    bg: "bg-gradient-to-br from-[#2e0a2a] to-[#1e081a]",
-    accent: "border-pink-400/30",
-    preset: "A short product advertisement for ",
-  },
+  { title: "STORY ANIME", subtitle: "Anime-style storytelling", bg: "from-[#2a1a2e] to-[#1a0a1e]", accent: "border-pink-500/30", preset: "An anime-style short story about " },
+  { title: "CHARACTER DESIGN", subtitle: "Original character creation", bg: "from-[#2a2a10] to-[#1a1a08]", accent: "border-yellow-500/30", preset: "A story starring an original character: " },
+  { title: "SCENE DESIGN", subtitle: "Environment & background", bg: "from-[#0a2a2a] to-[#081a1a]", accent: "border-cyan-500/30", preset: "A cinematic short set in " },
+  { title: "PRODUCT AD", subtitle: "Commercial advertising", bg: "from-[#2e0a2a] to-[#1e081a]", accent: "border-pink-400/30", preset: "A short product advertisement for " },
 ];
 
-// ── Component ──
+const nodeTypes = { frame: FrameNode };
+const defaultEdgeOptions = {
+  style: { stroke: "rgba(255,255,255,0.35)", strokeWidth: 2, strokeDasharray: "2 7" },
+};
+const PIPELINE_TABS = ["总览", "剧本", "角色", "场景", "分镜", "视频"];
 
-export default function WorkspacePage() {
+const nid = () => `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
+function WorkspaceInner() {
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const { getNode, getNodes, setCenter, fitView } = useReactFlow();
 
-  // Core state
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<FrameData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [projectName, setProjectName] = useState("Untitled Project");
   const [prompt, setPrompt] = useState("");
-  const [zoom, setZoom] = useState(100);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [frames, setFrames] = useState<WorkspaceFrame[]>([]);
-  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [filmUrl, setFilmUrl] = useState<string | null>(null);
@@ -168,111 +98,56 @@ export default function WorkspacePage() {
   const [showSkills, setShowSkills] = useState(true);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
 
-  // Interaction state
-  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
-  const [dragging, setDragging] = useState<DragState | null>(null);
-  const [resizing, setResizing] = useState<ResizeState | null>(null);
-  const [isPanning, setIsPanning] = useState(false);
-  const panStartRef = useRef({ x: 0, y: 0 });
-  const panOffsetStartRef = useRef({ x: 0, y: 0 });
-
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const avatar = user?.email?.[0]?.toUpperCase() ?? "U";
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Coordinate helpers ──
-
-  const screenToCanvas = useCallback(
-    (screenX: number, screenY: number) => {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return { x: screenX, y: screenY };
-      const scale = zoom / 100;
-      return {
-        x: (screenX - rect.left - rect.width / 2 - panOffset.x) / scale,
-        y: (screenY - rect.top - rect.height / 2 - panOffset.y) / scale,
-      };
+  const patchData = useCallback(
+    (id: string, patch: Partial<FrameData>) => {
+      setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
     },
-    [zoom, panOffset]
-  );
-
-  // ── Frame CRUD ──
-
-  const createFrame = useCallback(
-    (cx: number, cy: number) => {
-      const frame: WorkspaceFrame = {
-        id: crypto.randomUUID(),
-        x: cx - 128,
-        y: cy - 128,
-        width: 256,
-        height: 256,
-      };
-      setFrames((prev) => [...prev, frame]);
-      setSelectedFrameId(frame.id);
-      return frame;
-    },
-    []
-  );
-
-  const deleteFrame = useCallback(
-    (id: string) => {
-      setFrames((prev) => prev.filter((f) => f.id !== id));
-      if (selectedFrameId === id) setSelectedFrameId(null);
-    },
-    [selectedFrameId]
-  );
-
-  const updateFrame = useCallback(
-    (id: string, updates: Partial<WorkspaceFrame>) => {
-      setFrames((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
-      );
-    },
-    []
+    [setNodes]
   );
 
   // ── Persistence ──
-
   const saveWorkspace = useCallback(async () => {
     if (!user) return;
     const supabase = createClient();
-    const payload = {
-      user_id: user.id,
-      type: "canvas" as const,
-      name: projectName,
-      metadata: { frames, zoom, panOffset },
-    };
-
+    const clean = nodes.map((n) => ({
+      id: n.id,
+      type: "frame",
+      position: n.position,
+      data: {
+        label: n.data.label,
+        prompt: n.data.prompt,
+        imageUrl: n.data.imageUrl,
+        videoUrl: n.data.videoUrl,
+      },
+    }));
+    const metadata = { flow: { nodes: clean, edges }, name: projectName };
     if (workspaceId) {
-      await supabase
-        .from("assets")
-        .update({ name: projectName, metadata: { frames, zoom, panOffset } })
-        .eq("id", workspaceId);
+      await supabase.from("assets").update({ name: projectName, metadata }).eq("id", workspaceId);
     } else {
       const { data } = await supabase
         .from("assets")
-        .insert(payload)
+        .insert({ user_id: user.id, type: "canvas", name: projectName, metadata })
         .select("id")
         .single();
       if (data) setWorkspaceId(data.id);
     }
-  }, [user, projectName, frames, zoom, panOffset, workspaceId]);
+  }, [user, nodes, edges, projectName, workspaceId]);
 
-  // Debounced auto-save
   useEffect(() => {
     if (!user) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      saveWorkspace();
-    }, 2000);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveWorkspace(), 2000);
     return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [frames, projectName, zoom, panOffset, saveWorkspace, user]);
+  }, [nodes, edges, projectName, saveWorkspace, user]);
 
-  // Load workspace on mount
   useEffect(() => {
     if (!user) return;
-    const load = async () => {
+    (async () => {
       const supabase = createClient();
       const { data } = await supabase
         .from("assets")
@@ -282,70 +157,22 @@ export default function WorkspacePage() {
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
-
-      if (data?.metadata) {
-        const m = data.metadata as {
-          frames?: WorkspaceFrame[];
-          zoom?: number;
-          panOffset?: { x: number; y: number };
-        };
-        if (m.frames) setFrames(m.frames);
-        if (m.zoom) setZoom(m.zoom);
-        if (m.panOffset) setPanOffset(m.panOffset);
-        if (data.name) setProjectName(data.name);
-        setWorkspaceId(data.id);
+      const flow = (data?.metadata as { flow?: { nodes: Node<FrameData>[]; edges: Edge[] } })?.flow;
+      if (flow?.nodes) {
+        setNodes(flow.nodes);
+        setEdges(flow.edges || []);
+        if (data?.name) setProjectName(data.name);
+        setWorkspaceId(data!.id);
+        setShowSkills(false);
       }
-    };
-    load();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // ── Image generation ──
-
-  const handleGenerate = useCallback(async () => {
-    if (!prompt.trim()) return;
-    setIsGenerating(true);
-
-    // Determine target frame
-    let targetId = selectedFrameId;
-    if (!targetId) {
-      const f = createFrame(0, 0);
-      targetId = f.id;
-    }
-
-    try {
-      const res = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), width: 1024, height: 1024 }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Generation failed");
-
-      updateFrame(targetId, {
-        imageUrl: data.image_url,
-        prompt: prompt.trim(),
-        label: prompt.trim().slice(0, 40),
-      });
-      toast.success("Image generated");
-      setPrompt("");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [prompt, selectedFrameId, createFrame, updateFrame]);
-
-  // ── Agent: one prompt → full storyboard on the canvas ──
-
-  // Generate an image for a specific frame; returns the image url (or null on failure).
-  const generateIntoFrame = useCallback(
-    async (
-      frameId: string,
-      imagePrompt: string,
-      label: string,
-      referenceImages?: string[]
-    ) => {
+  // ── Generation ──
+  const generateIntoNode = useCallback(
+    async (id: string, imagePrompt: string, label: string, referenceImages?: string[]) => {
+      patchData(id, { status: "generating" });
       try {
         const res = await fetch("/api/generate-image", {
           method: "POST",
@@ -359,18 +186,109 @@ export default function WorkspacePage() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Generation failed");
-        updateFrame(frameId, { imageUrl: data.image_url, prompt: imagePrompt, label });
+        patchData(id, { imageUrl: data.image_url, prompt: imagePrompt, label, status: "done" });
         return data.image_url as string;
       } catch (err) {
-        updateFrame(frameId, { label: `⚠ ${label}` });
+        patchData(id, { status: "error", label: `⚠ ${label}` });
         toast.error(err instanceof Error ? err.message : "Generation failed");
         return null;
       }
     },
-    [updateFrame]
+    [patchData]
   );
 
-  // Step 1 — the agent team drafts a plan for review (no credits spent yet).
+  const animateOne = useCallback(
+    async (node: Node<FrameData>): Promise<string | null> => {
+      const d = node.data;
+      if (!d.imageUrl) return null;
+      if (d.videoUrl) return d.videoUrl;
+      patchData(node.id, { animating: true });
+      try {
+        const res = await fetch("/api/generate-video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: d.prompt || d.label || "Animate this shot",
+            image_url: d.imageUrl,
+            duration: 5,
+            aspect_ratio: "16:9",
+            resolution: "720p",
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to start animation");
+        const { task_id, asset_id } = data;
+        const started = Date.now();
+        for (;;) {
+          if (Date.now() - started > 5 * 60 * 1000) throw new Error("Animation timed out");
+          const q = new URLSearchParams({ task_id });
+          if (asset_id) q.set("asset_id", asset_id);
+          const r = await fetch(`/api/generate-video?${q.toString()}`);
+          const j = await r.json();
+          if (j.state === "success" && j.video_url) {
+            patchData(node.id, { videoUrl: j.video_url, animating: false });
+            return j.video_url as string;
+          }
+          if (j.state === "fail") throw new Error(j.fail_msg || "Animation failed");
+          await new Promise((r2) => setTimeout(r2, 5000));
+        }
+      } catch (err) {
+        patchData(node.id, { animating: false });
+        toast.error(err instanceof Error ? err.message : "Animation failed");
+        return null;
+      }
+    },
+    [patchData]
+  );
+
+  // ── Node actions (via context) ──
+  const onAnimate = useCallback(
+    (id: string) => {
+      const n = getNode(id) as Node<FrameData> | undefined;
+      if (!n?.data.imageUrl) {
+        toast("Generate an image in this frame first.");
+        return;
+      }
+      if (n.data.animating) return;
+      toast("Animating shot…");
+      animateOne(n).then((url) => url && toast.success("Shot animated"));
+    },
+    [getNode, animateOne]
+  );
+  const onDelete = useCallback(
+    (id: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== id));
+      setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+    },
+    [setNodes, setEdges]
+  );
+
+  const onConnect = useCallback((c: Connection) => setEdges((eds) => addEdge(c, eds)), [setEdges]);
+
+  const addNode = useCallback(() => {
+    const id = nid();
+    setNodes((nds) => [
+      ...nds,
+      { id, type: "frame", position: { x: Math.random() * 200, y: Math.random() * 200 }, data: {} },
+    ]);
+  }, [setNodes]);
+
+  // ── Dock: single generate ──
+  const handleGenerate = useCallback(async () => {
+    const p = prompt.trim();
+    if (!p) return;
+    const id = nid();
+    setNodes((nds) => [...nds, { id, type: "frame", position: { x: 0, y: 0 }, data: { label: p.slice(0, 30) } }]);
+    setPrompt("");
+    setIsGenerating(true);
+    try {
+      await generateIntoNode(id, p, p.slice(0, 30));
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [prompt, setNodes, generateIntoNode]);
+
+  // ── Agent: plan then approve ──
   const handleAgentPlan = useCallback(async () => {
     const idea = prompt.trim();
     if (!idea) {
@@ -380,7 +298,6 @@ export default function WorkspacePage() {
     setIsGenerating(true);
     setAgentStatus("The agent team is planning your story…");
     setAgentLog([]);
-
     try {
       const res = await fetch("/api/orchestrate", {
         method: "POST",
@@ -389,28 +306,14 @@ export default function WorkspacePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Orchestration failed");
-
-      const plan = data.plan as {
-        title: string;
-        logline: string;
-        style_preset: string;
-        character: { name: string; appearance_prompt: string };
-        panels: Array<{
-          id: string;
-          scene_description: string;
-          dialogue: string;
-          shot_type: string;
-          image_prompt: string;
-        }>;
-      };
-
+      const plan = data.plan;
       const draft: PlanDraft = {
         title: plan.title || "Untitled",
         logline: plan.logline || "",
         style_preset: plan.style_preset || "anime",
         characterName: plan.character?.name || "Main Character",
         appearance: plan.character?.appearance_prompt || "",
-        shots: plan.panels.map((p) => ({
+        shots: (plan.panels || []).map((p: PlanShot) => ({
           id: p.id,
           scene_description: p.scene_description || "",
           dialogue: p.dialogue || "",
@@ -418,16 +321,13 @@ export default function WorkspacePage() {
           image_prompt: p.image_prompt || p.scene_description || "",
         })),
       };
-
-      // Show what each specialist contributed (the "visible agent team").
       setAgentLog([
         { agent: "Art Director", text: `Set the visual style: ${draft.style_preset}.` },
         { agent: "Scriptwriter", text: `"${draft.logline}" — ${draft.shots.length} shots.` },
         { agent: "Character Designer", text: `Locked character: ${draft.characterName}.` },
-        { agent: "Storyboard Artist", text: `Laid out ${draft.shots.length} shots with camera framing.` },
-        { agent: "Sound Director", text: `Will score the film when you assemble it.` },
+        { agent: "Storyboard Artist", text: `Laid out ${draft.shots.length} shots.` },
+        { agent: "Sound Director", text: `Will score the film on assemble.` },
       ]);
-
       setPlanDraft(draft);
       setProjectName(draft.title);
     } catch (err) {
@@ -438,7 +338,6 @@ export default function WorkspacePage() {
     }
   }, [prompt]);
 
-  // Step 2 — user approved the (possibly edited) plan: generate it on the canvas.
   const handleApprovePlan = useCallback(async () => {
     if (!planDraft) return;
     const plan = planDraft;
@@ -447,137 +346,70 @@ export default function WorkspacePage() {
       toast("Add at least one shot before generating.");
       return;
     }
-
     setPlanDraft(null);
     setShowSkills(false);
     setPrompt("");
     setIsGenerating(true);
-
     try {
-      // Lay out a connected vertical flow: character → shot → shot …, each linked
-      // to the previous so the canvas draws a dotted spine (oiioii-style).
-      const VSTEP = 340;
+      // Build a connected vertical flow: character → shot → shot …
+      const charId = nid();
+      const shotDefs = shots.map((shot) => ({ id: nid(), shot }));
+      const newNodes: Node<FrameData>[] = [
+        { id: charId, type: "frame", position: { x: 0, y: 0 }, data: { label: `★ ${plan.characterName}` } },
+        ...shotDefs.map((s, i) => ({
+          id: s.id,
+          type: "frame",
+          position: { x: 0, y: (i + 1) * 340 },
+          data: { label: `Shot ${i + 1}` } as FrameData,
+        })),
+      ];
+      const newEdges: Edge[] = [];
+      let prev = charId;
+      for (const s of shotDefs) {
+        newEdges.push({ id: `e-${prev}-${s.id}`, source: prev, target: s.id });
+        prev = s.id;
+      }
+      setNodes((nds) => [...nds, ...newNodes]);
+      setEdges((eds) => [...eds, ...newEdges]);
+      setTimeout(() => fitView({ duration: 500, padding: 0.2 }), 100);
 
-      const charFrame = createFrame(0, 0);
-      updateFrame(charFrame.id, { label: `★ ${plan.characterName}` });
-
-      let prevId = charFrame.id;
-      const shotFrames = shots.map((shot, i) => {
-        const f = createFrame(0, (i + 1) * VSTEP);
-        updateFrame(f.id, { label: `Shot ${i + 1}`, parentId: prevId });
-        prevId = f.id;
-        return { frameId: f.id, shot };
-      });
-
-      // Render the locked character first, then feed that image into every shot.
       setAgentStatus(`Designing ${plan.characterName}…`);
-      const characterUrl = await generateIntoFrame(
-        charFrame.id,
+      const charUrl = await generateIntoNode(
+        charId,
         `Character reference sheet, full body, neutral pose, clean background. ${plan.appearance}`,
         `★ ${plan.characterName}`
       );
-      const characterRefs = characterUrl ? [characterUrl] : undefined;
+      const refs = charUrl ? [charUrl] : undefined;
 
-      for (let i = 0; i < shotFrames.length; i++) {
-        const { frameId, shot } = shotFrames[i];
-        setAgentStatus(`Rendering shot ${i + 1} of ${shotFrames.length}…`);
-        await generateIntoFrame(frameId, composeShotPrompt(plan, shot), `Shot ${i + 1}`, characterRefs);
+      for (let i = 0; i < shotDefs.length; i++) {
+        setAgentStatus(`Rendering shot ${i + 1} of ${shotDefs.length}…`);
+        await generateIntoNode(shotDefs[i].id, composeShotPrompt(plan, shotDefs[i].shot), `Shot ${i + 1}`, refs);
       }
-
-      toast.success(`"${plan.title}" — ${shotFrames.length} shots generated`);
+      toast.success(`"${plan.title}" — ${shotDefs.length} shots generated`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Generation failed");
     } finally {
       setIsGenerating(false);
       setAgentStatus(null);
     }
-  }, [planDraft, createFrame, updateFrame, generateIntoFrame]);
+  }, [planDraft, setNodes, setEdges, fitView, generateIntoNode]);
 
-  // ── Animate a shot: image → video (image-to-video via /api/generate-video) ──
-
-  // Core: animate a single frame, returning the resulting video URL (or null).
-  const animateOne = useCallback(
-    async (frame: WorkspaceFrame): Promise<string | null> => {
-      if (!frame.imageUrl) return null;
-      if (frame.videoUrl) return frame.videoUrl;
-      updateFrame(frame.id, { animating: true });
-      try {
-        const res = await fetch("/api/generate-video", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: frame.prompt || frame.label || "Animate this shot",
-            image_url: frame.imageUrl,
-            duration: 5,
-            aspect_ratio: "16:9",
-            resolution: "720p",
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Failed to start animation");
-
-        const { task_id, asset_id } = data;
-        const started = Date.now();
-        const MAX_MS = 5 * 60 * 1000;
-        // Poll until the video task completes (seedance ~1-3 min).
-        for (;;) {
-          if (Date.now() - started > MAX_MS) throw new Error("Animation timed out");
-          const q = new URLSearchParams({ task_id });
-          if (asset_id) q.set("asset_id", asset_id);
-          const r = await fetch(`/api/generate-video?${q.toString()}`);
-          const j = await r.json();
-          if (j.state === "success" && j.video_url) {
-            updateFrame(frame.id, { videoUrl: j.video_url, animating: false });
-            return j.video_url as string;
-          }
-          if (j.state === "fail") throw new Error(j.fail_msg || "Animation failed");
-          await new Promise((r2) => setTimeout(r2, 5000));
-        }
-      } catch (err) {
-        updateFrame(frame.id, { animating: false });
-        toast.error(err instanceof Error ? err.message : "Animation failed");
-        return null;
-      }
-    },
-    [updateFrame]
-  );
-
-  const animateFrame = useCallback(
-    async (frameId: string) => {
-      const frame = frames.find((f) => f.id === frameId);
-      if (!frame?.imageUrl) {
-        toast("Generate an image in this frame first.");
-        return;
-      }
-      if (frame.animating) return;
-      toast("Animating shot…");
-      const url = await animateOne(frame);
-      if (url) toast.success("Shot animated");
-    },
-    [frames, animateOne]
-  );
-
-  // ── Assemble Film: animate every shot, then stitch into one video ──
-
+  // ── Assemble film ──
   const handleAssembleFilm = useCallback(async () => {
-    // Collect shot frames in order (Agent labels them "Shot N"; skip the ★ character sheet).
-    const shots = frames
-      .filter((f) => f.imageUrl && !(f.label ?? "").startsWith("★"))
+    const shots = getNodes()
+      .filter((n) => (n.data as FrameData).imageUrl && !((n.data as FrameData).label ?? "").startsWith("★"))
       .sort((a, b) => {
-        const na = parseInt((a.label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
-        const nb = parseInt((b.label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
+        const na = parseInt(((a.data as FrameData).label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
+        const nb = parseInt(((b.data as FrameData).label ?? "").match(/Shot (\d+)/)?.[1] ?? "");
         if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-        return a.y - b.y || a.x - b.x;
-      });
-
+        return a.position.y - b.position.y;
+      }) as Node<FrameData>[];
     if (shots.length === 0) {
       toast("Generate some shots first — run the Agent.");
       return;
     }
-
     setIsGenerating(true);
     try {
-      // 0) Kick off the score in parallel (best-effort — film still assembles without it).
       let musicTaskId: string | null = null;
       try {
         const mres = await fetch("/api/generate-music", {
@@ -590,11 +422,8 @@ export default function WorkspacePage() {
         });
         const md = await mres.json();
         if (mres.ok) musicTaskId = md.task_id;
-      } catch {
-        /* music is optional */
-      }
+      } catch {}
 
-      // 1) Ensure every shot has a video clip (animate the ones that don't).
       const urls: string[] = [];
       for (let i = 0; i < shots.length; i++) {
         setAgentStatus(`Animating shot ${i + 1} of ${shots.length}…`);
@@ -603,7 +432,6 @@ export default function WorkspacePage() {
       }
       if (urls.length === 0) throw new Error("No clips were produced");
 
-      // 2) Wait for the score (usually done by now; give it up to ~3 min).
       let audioUrl: string | undefined;
       if (musicTaskId) {
         setAgentStatus("Scoring the music…");
@@ -624,7 +452,6 @@ export default function WorkspacePage() {
         }
       }
 
-      // 3) Stitch clips (+ score) into a single film server-side.
       setAgentStatus(`Assembling ${urls.length} shots into your film…`);
       const res = await fetch("/api/compose-film", {
         method: "POST",
@@ -633,7 +460,6 @@ export default function WorkspacePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Film assembly failed");
-
       setFilmUrl(data.film_url);
       toast.success("Your film is ready 🎬");
     } catch (err) {
@@ -642,14 +468,13 @@ export default function WorkspacePage() {
       setIsGenerating(false);
       setAgentStatus(null);
     }
-  }, [frames, projectName, animateOne]);
-
-  // ── Publish to the community gallery ──
+  }, [getNodes, projectName, animateOne]);
 
   const handlePublish = useCallback(async () => {
+    const withImg = getNodes().filter((n) => (n.data as FrameData).imageUrl);
     const cover =
-      frames.find((f) => f.imageUrl && !(f.label ?? "").startsWith("★"))?.imageUrl ||
-      frames.find((f) => f.imageUrl)?.imageUrl ||
+      (withImg.find((n) => !((n.data as FrameData).label ?? "").startsWith("★"))?.data as FrameData | undefined)?.imageUrl ||
+      (withImg[0]?.data as FrameData | undefined)?.imageUrl ||
       null;
     if (!cover && !filmUrl) {
       toast("Generate shots or assemble a film before publishing.");
@@ -667,912 +492,321 @@ export default function WorkspacePage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Publish failed");
     }
-  }, [frames, projectName, filmUrl]);
+  }, [getNodes, projectName, filmUrl]);
 
-  // ── Canvas event handlers ──
-
-  const handleCanvasDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      if ((e.target as HTMLElement).closest("[data-frame-id]")) return;
-      const pos = screenToCanvas(e.clientX, e.clientY);
-      createFrame(pos.x, pos.y);
-    },
-    [screenToCanvas, createFrame]
-  );
-
-  const handleCanvasContextMenu = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const frameEl = (e.target as HTMLElement).closest("[data-frame-id]");
-      const pos = screenToCanvas(e.clientX, e.clientY);
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        canvasX: pos.x,
-        canvasY: pos.y,
-        frameId: frameEl?.getAttribute("data-frame-id") ?? undefined,
-      });
-    },
-    [screenToCanvas]
-  );
-
-  const handleCanvasMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      // Close context menu on any click
-      if (contextMenu) setContextMenu(null);
-
-      // Middle-click or space+left → start panning
-      if (e.button === 1) {
-        e.preventDefault();
-        setIsPanning(true);
-        panStartRef.current = { x: e.clientX, y: e.clientY };
-        panOffsetStartRef.current = { ...panOffset };
+  // ── Pipeline tabs ──
+  const focusStage = useCallback(
+    (stage: string) => {
+      const ns = getNodes();
+      if (ns.length === 0) return;
+      if (stage === "总览") {
+        fitView({ duration: 400, padding: 0.2 });
         return;
       }
-
-      // Left-click on canvas background → deselect
-      if (e.button === 0) {
-        const frameEl = (e.target as HTMLElement).closest("[data-frame-id]");
-        if (!frameEl) {
-          setSelectedFrameId(null);
-        }
-      }
+      const first = (pred: (l: string) => boolean) => ns.find((n) => pred(((n.data as FrameData).label ?? "")));
+      const pick =
+        stage === "角色"
+          ? first((l) => l.startsWith("★"))
+          : stage === "视频"
+          ? [...ns].reverse().find((n) => (((n.data as FrameData).label ?? "").startsWith("Shot")))
+          : first((l) => l.startsWith("Shot")) ?? ns[0];
+      if (pick) setCenter(pick.position.x + 120, pick.position.y + 140, { zoom: 0.9, duration: 400 });
     },
-    [contextMenu, panOffset]
+    [getNodes, setCenter, fitView]
   );
-
-  // Frame drag start (called from frame's onMouseDown)
-  const handleFrameDragStart = useCallback(
-    (e: React.MouseEvent, frameId: string) => {
-      if (e.button !== 0) return;
-      // Don't start drag if clicking a resize handle
-      if ((e.target as HTMLElement).dataset.resizeHandle) return;
-      e.stopPropagation();
-      setSelectedFrameId(frameId);
-      const frame = frames.find((f) => f.id === frameId);
-      if (!frame) return;
-      setDragging({
-        frameId,
-        startX: e.clientX,
-        startY: e.clientY,
-        origX: frame.x,
-        origY: frame.y,
-      });
-    },
-    [frames]
-  );
-
-  // Resize start
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent, frameId: string, edge: string) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const frame = frames.find((f) => f.id === frameId);
-      if (!frame) return;
-      setResizing({
-        frameId,
-        edge,
-        startX: e.clientX,
-        startY: e.clientY,
-        origW: frame.width,
-        origH: frame.height,
-        origX: frame.x,
-        origY: frame.y,
-      });
-    },
-    [frames]
-  );
-
-  // Global mouse move/up for drag, resize, pan
-  useEffect(() => {
-    const scale = zoom / 100;
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (isPanning) {
-        const dx = e.clientX - panStartRef.current.x;
-        const dy = e.clientY - panStartRef.current.y;
-        setPanOffset({
-          x: panOffsetStartRef.current.x + dx,
-          y: panOffsetStartRef.current.y + dy,
-        });
-        return;
-      }
-
-      if (dragging) {
-        const dx = (e.clientX - dragging.startX) / scale;
-        const dy = (e.clientY - dragging.startY) / scale;
-        updateFrame(dragging.frameId, {
-          x: dragging.origX + dx,
-          y: dragging.origY + dy,
-        });
-        return;
-      }
-
-      if (resizing) {
-        const dx = (e.clientX - resizing.startX) / scale;
-        const dy = (e.clientY - resizing.startY) / scale;
-        const minSize = 64;
-        const edge = resizing.edge;
-
-        let newW = resizing.origW;
-        let newH = resizing.origH;
-        let newX = resizing.origX;
-        let newY = resizing.origY;
-
-        if (edge.includes("r")) newW = Math.max(minSize, resizing.origW + dx);
-        if (edge.includes("b")) newH = Math.max(minSize, resizing.origH + dy);
-        if (edge.includes("l")) {
-          newW = Math.max(minSize, resizing.origW - dx);
-          if (newW > minSize) newX = resizing.origX + dx;
-        }
-        if (edge.includes("t")) {
-          newH = Math.max(minSize, resizing.origH - dy);
-          if (newH > minSize) newY = resizing.origY + dy;
-        }
-
-        updateFrame(resizing.frameId, {
-          width: newW,
-          height: newH,
-          x: newX,
-          y: newY,
-        });
-      }
-    };
-
-    const onMouseUp = () => {
-      setDragging(null);
-      setResizing(null);
-      setIsPanning(false);
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [dragging, resizing, isPanning, zoom, updateFrame]);
-
-  // Ctrl+scroll → zoom
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      setZoom((z) => {
-        const next = z - Math.sign(e.deltaY) * 10;
-        return Math.min(200, Math.max(10, next));
-      });
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Delete" && selectedFrameId) {
-        deleteFrame(selectedFrameId);
-      }
-      if (e.key === "Escape") {
-        setSelectedFrameId(null);
-        setContextMenu(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectedFrameId, deleteFrame]);
-
-  // ── Prompt bar toolbar actions ──
-
-  const toolbarAction = useCallback(
-    (label: string) => {
-      switch (label) {
-        case "Skill":
-          setShowSkills((v) => !v);
-          break;
-        case "Agent":
-          handleAgentPlan();
-          break;
-        case "Styles":
-          toast("Styles — coming soon");
-          break;
-        case "Assets":
-          router.push("/assets");
-          break;
-      }
-    },
-    [router, handleAgentPlan]
-  );
-
-  // ── Render ──
-
-  const scale = zoom / 100;
-
-  // Center the view on a frame (used by the top pipeline tabs).
-  const centerOnFrame = (f: WorkspaceFrame, z: number = zoom) => {
-    const s = z / 100;
-    setPanOffset({ x: -(f.x + f.width / 2) * s, y: -(f.y + f.height / 2) * s });
-  };
-  const focusStage = (stage: string) => {
-    if (frames.length === 0) return;
-    if (stage === "总览") {
-      setZoom(45);
-      const minY = Math.min(...frames.map((f) => f.y));
-      const maxY = Math.max(...frames.map((f) => f.y + f.height));
-      setPanOffset({ x: 0, y: -(((minY + maxY) / 2) * 0.45) });
-      return;
-    }
-    const first = (pred: (l: string) => boolean) => frames.find((f) => pred(f.label ?? ""));
-    const target =
-      stage === "角色"
-        ? first((l) => l.startsWith("★"))
-        : stage === "视频"
-        ? [...frames].reverse().find((f) => (f.label ?? "").startsWith("Shot"))
-        : first((l) => l.startsWith("Shot")) ?? frames[0];
-    if (target) centerOnFrame(target);
-  };
-  const PIPELINE_TABS = ["总览", "剧本", "角色", "场景", "分镜", "视频"];
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[oklch(0.08_0_0)]">
-      {/* ── Top Bar ── */}
-      <header className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[oklch(0.10_0_0)] px-3">
-        {/* Left */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => router.push("/gallery")}
-            title="Gallery"
-            className="flex h-7 w-7 items-center justify-center rounded-lg bg-pink-600 text-white hover:bg-pink-500 transition-colors"
-          >
-            <Sparkles className="h-4 w-4" />
-          </button>
-          <input
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            className="bg-transparent text-sm text-white outline-none placeholder:text-white/40 w-36"
-          />
-          <button className="text-white/40 hover:text-white/70 transition-colors">
-            <Share2 className="h-3.5 w-3.5" />
-          </button>
-          <button className="text-white/40 hover:text-white/70 transition-colors">
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* Center — pipeline stage tabs */}
-        <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-5 md:flex">
-          {PIPELINE_TABS.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => focusStage(tab)}
-              className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors"
-            >
-              <span className="h-1 w-1 rounded-full bg-pink-500/70" />
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Right */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleAssembleFilm}
-            disabled={isGenerating}
-            className="flex items-center gap-1.5 rounded-md bg-pink-600 px-3 py-1 text-xs font-medium text-white hover:bg-pink-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Animate every shot and stitch them into one film"
-          >
-            <Film className="h-3.5 w-3.5" />
-            Assemble Film
-          </button>
-          <button
-            onClick={handlePublish}
-            className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 hover:bg-white/5 transition-colors"
-          >
-            Publish
-          </button>
-          <button
-            onClick={signOut}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-[11px] font-semibold text-white"
-          >
-            {avatar}
-          </button>
-        </div>
-      </header>
-
-      {/* ── Canvas Area ── */}
-      <main
-        ref={canvasRef}
-        className="relative flex-1 overflow-hidden canvas-dots select-none"
-        style={{ cursor: isPanning ? "grabbing" : "default" }}
-        onDoubleClick={handleCanvasDoubleClick}
-        onContextMenu={handleCanvasContextMenu}
-        onMouseDown={handleCanvasMouseDown}
-      >
-        {/* Zoom/pan container */}
-        <div
-          className="absolute inset-0"
-          style={{
-            transform: `translate(${panOffset.x}px, ${panOffset.y}px)`,
-          }}
-        >
-          <div
-            className="absolute"
-            style={{
-              left: "50%",
-              top: "50%",
-              transform: `scale(${scale})`,
-              transformOrigin: "0 0",
-            }}
-          >
-            {/* Flow connectors — dotted curves from each node to its parent */}
-            <svg
-              style={{ position: "absolute", left: 0, top: 0, overflow: "visible", pointerEvents: "none" }}
-              width={1}
-              height={1}
-            >
-              {frames.map((f) => {
-                if (!f.parentId) return null;
-                const p = frames.find((x) => x.id === f.parentId);
-                if (!p) return null;
-                const x1 = p.x + p.width / 2;
-                const y1 = p.y + p.height;
-                const x2 = f.x + f.width / 2;
-                const y2 = f.y;
-                const midY = (y1 + y2) / 2;
-                return (
-                  <path
-                    key={`edge-${f.id}`}
-                    d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
-                    fill="none"
-                    stroke="rgba(255,255,255,0.35)"
-                    strokeWidth={2}
-                    strokeDasharray="2 7"
-                    strokeLinecap="round"
-                  />
-                );
-              })}
-            </svg>
-
-            {/* Frames */}
-            {frames.map((frame) => {
-              const isSelected = frame.id === selectedFrameId;
-              return (
-                <div
-                  key={frame.id}
-                  data-frame-id={frame.id}
-                  className={`absolute group rounded-lg border-2 transition-shadow ${
-                    isSelected
-                      ? "border-pink-500 shadow-[0_0_20px_rgba(236,72,153,0.3)]"
-                      : "border-white/20 hover:border-white/40"
-                  }`}
-                  style={{
-                    left: frame.x,
-                    top: frame.y,
-                    width: frame.width,
-                    height: frame.height,
-                    cursor: dragging ? "grabbing" : "grab",
-                  }}
-                  onMouseDown={(e) => handleFrameDragStart(e, frame.id)}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedFrameId(frame.id);
-                  }}
-                >
-                  {/* Content */}
-                  {frame.videoUrl ? (
-                    <video
-                      src={frame.videoUrl}
-                      className="h-full w-full rounded-md object-cover pointer-events-none"
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                    />
-                  ) : frame.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={frame.imageUrl}
-                      alt={frame.label || "Generated"}
-                      className="h-full w-full rounded-md object-cover pointer-events-none"
-                      draggable={false}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-md bg-white/[0.03]">
-                      <Plus className="h-8 w-8 text-white/20" />
-                      <span className="text-[10px] text-white/30">
-                        Empty frame
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Animating overlay */}
-                  {frame.animating && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-md bg-black/60 pointer-events-none">
-                      <Loader2 className="h-5 w-5 animate-spin text-pink-400" />
-                      <span className="text-[10px] text-white/70">Animating…</span>
-                    </div>
-                  )}
-
-                  {/* Label bar */}
-                  {frame.label && (
-                    <div className="absolute bottom-0 left-0 right-0 rounded-b-md bg-black/70 px-2 py-1 text-[10px] text-white/70 truncate">
-                      {frame.label}
-                    </div>
-                  )}
-
-                  {/* Selected controls */}
-                  {isSelected && (
-                    <>
-                      {/* Animate button — only when there's an image to animate */}
-                      {frame.imageUrl && !frame.videoUrl && (
-                        <button
-                          className="absolute -top-3 -left-3 flex h-6 w-6 items-center justify-center rounded-full bg-pink-600 text-white hover:bg-pink-500 z-10 disabled:opacity-50"
-                          title="Animate this shot"
-                          disabled={frame.animating}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            animateFrame(frame.id);
-                          }}
-                        >
-                          {frame.animating ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Film className="h-3 w-3" />
-                          )}
-                        </button>
-                      )}
-
-                      {/* Delete button */}
-                      <button
-                        className="absolute -top-3 -right-3 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 z-10"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteFrame(frame.id);
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-
-                      {/* Resize handles: 4 corners */}
-                      {["tl", "tr", "bl", "br"].map((edge) => (
-                        <div
-                          key={edge}
-                          data-resize-handle="true"
-                          className="absolute h-3 w-3 rounded-full bg-pink-500 border-2 border-white z-10"
-                          style={{
-                            cursor:
-                              edge === "tl" || edge === "br"
-                                ? "nwse-resize"
-                                : "nesw-resize",
-                            top: edge.includes("t") ? -6 : undefined,
-                            bottom: edge.includes("b") ? -6 : undefined,
-                            left: edge.includes("l") ? -6 : undefined,
-                            right: edge.includes("r") ? -6 : undefined,
-                          }}
-                          onMouseDown={(e) => {
-                            const mapped =
-                              edge === "tl"
-                                ? "tl"
-                                : edge === "tr"
-                                ? "tr"
-                                : edge === "bl"
-                                ? "bl"
-                                : "br";
-                            handleResizeStart(e, frame.id, mapped);
-                          }}
-                        />
-                      ))}
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Hint overlay — only when no frames */}
-        {frames.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <div className="mb-10 flex flex-col items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.06] border border-white/10">
-                <Sparkles className="h-4 w-4 text-pink-400" />
-              </div>
-              <p className="text-sm text-white/40 text-center max-w-xs">
-                Double or right click anywhere to create a frame and start
-                generating.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Agent status pill */}
-        {agentStatus && (
-          <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 flex items-center gap-2 rounded-full border border-pink-500/30 bg-black/70 px-4 py-1.5 backdrop-blur-sm">
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-pink-400" />
-            <span className="text-xs text-white/80">{agentStatus}</span>
-          </div>
-        )}
-
-        {/* Skills Row */}
-        {showSkills && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-center gap-3 overflow-x-auto px-6 pb-2 no-scrollbar max-w-full">
-            {/* Add Frame card */}
-            <button
-              onClick={() => createFrame(0, 0)}
-              className="flex h-[140px] w-[110px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/20 text-white/40 hover:border-white/40 hover:text-white/60 transition-colors bg-black/40 backdrop-blur-sm"
-            >
-              <Plus className="h-6 w-6" />
-              <span className="text-[10px] font-medium">Add Frame</span>
-            </button>
-
-            {/* Skill cards */}
-            {skillCards.map((card) => (
-              <button
-                key={card.title}
-                onClick={() => {
-                  setPrompt(card.preset);
-                  setShowSkills(false);
-                }}
-                className={`flex h-[140px] w-[110px] shrink-0 flex-col justify-end rounded-xl border ${card.accent} ${card.bg} p-3 text-left transition-transform hover:scale-105`}
-              >
-                <span className="text-[10px] font-bold uppercase tracking-wider text-white">
-                  {card.title}
-                </span>
-                <span className="mt-0.5 text-[9px] text-white/50">
-                  {card.subtitle}
-                </span>
-              </button>
-            ))}
-
-            {/* All Skills link */}
+    <FrameActionsContext.Provider value={{ onAnimate, onDelete }}>
+      <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-[oklch(0.08_0_0)]">
+        {/* Top bar */}
+        <header className="relative z-20 flex h-12 shrink-0 items-center justify-between border-b border-white/[0.06] bg-[oklch(0.10_0_0)] px-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => router.push("/gallery")}
-              className="flex shrink-0 items-center gap-0.5 text-xs text-white/40 hover:text-white/70 transition-colors whitespace-nowrap"
+              title="Gallery"
+              className="flex h-7 w-7 items-center justify-center rounded-lg bg-pink-600 text-white hover:bg-pink-500 transition-colors"
             >
-              All Skills <ChevronRight className="h-3 w-3" />
+              <Sparkles className="h-4 w-4" />
+            </button>
+            <input
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              className="w-36 bg-transparent text-sm text-white outline-none placeholder:text-white/40"
+            />
+            <button className="text-white/40 hover:text-white/70">
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
+            <button className="text-white/40 hover:text-white/70">
+              <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
           </div>
-        )}
 
-        {/* Context menu */}
-        {contextMenu && (
-          <div
-            className="fixed z-50 min-w-[160px] rounded-lg border border-white/10 bg-[oklch(0.13_0_0)] py-1 shadow-xl"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
-            {contextMenu.frameId ? (
-              <>
-                <button
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06]"
-                  onClick={() => {
-                    setSelectedFrameId(contextMenu.frameId!);
-                    setContextMenu(null);
-                    // Focus prompt bar
-                    const ta = document.querySelector(
-                      "textarea"
-                    ) as HTMLTextAreaElement | null;
-                    ta?.focus();
-                  }}
-                >
-                  <Sparkles className="h-3 w-3" /> Generate Image
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06] disabled:opacity-40"
-                  disabled={!frames.find((f) => f.id === contextMenu.frameId)?.imageUrl}
-                  onClick={() => {
-                    animateFrame(contextMenu.frameId!);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Film className="h-3 w-3" /> Animate Frame
-                </button>
-                <button
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-white/[0.06]"
-                  onClick={() => {
-                    deleteFrame(contextMenu.frameId!);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Trash2 className="h-3 w-3" /> Delete Frame
-                </button>
-              </>
-            ) : (
+          {/* Pipeline tabs */}
+          <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-5 md:flex">
+            {PIPELINE_TABS.map((tab) => (
               <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06]"
-                onClick={() => {
-                  createFrame(contextMenu.canvasX, contextMenu.canvasY);
-                  setContextMenu(null);
-                }}
+                key={tab}
+                onClick={() => focusStage(tab)}
+                className="flex items-center gap-1.5 text-xs font-medium text-white/50 transition-colors hover:text-white"
               >
-                <Plus className="h-3 w-3" /> Add Frame Here
+                <span className="h-1 w-1 rounded-full bg-pink-500/70" />
+                {tab}
               </button>
-            )}
+            ))}
           </div>
-        )}
 
-        {/* Right-edge floating tools */}
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-1.5 z-10">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAssembleFilm}
+              disabled={isGenerating}
+              className="flex items-center gap-1.5 rounded-md bg-pink-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-pink-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Film className="h-3.5 w-3.5" />
+              Assemble Film
+            </button>
+            <button
+              onClick={handlePublish}
+              className="rounded-md border border-white/10 px-3 py-1 text-xs text-white/70 transition-colors hover:bg-white/5"
+            >
+              Publish
+            </button>
+            <button
+              onClick={signOut}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-[11px] font-semibold text-white"
+            >
+              {avatar}
+            </button>
+          </div>
+        </header>
+
+        {/* Canvas */}
+        <div className="relative flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeTypes}
+            defaultEdgeOptions={defaultEdgeOptions}
+            fitView
+            minZoom={0.1}
+            maxZoom={2}
+            proOptions={{ hideAttribution: true }}
+            className="bg-[oklch(0.08_0_0)]"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#2a2a35" />
+            <MiniMap
+              pannable
+              zoomable
+              nodeColor="#3a3a46"
+              maskColor="rgba(0,0,0,0.6)"
+              className="!bottom-4 !right-4 !border !border-white/10 !bg-[oklch(0.11_0_0)]"
+            />
+            <Controls
+              showInteractive={false}
+              className="!bottom-4 !left-[360px] !rounded-lg !border !border-white/10 !bg-[oklch(0.11_0_0)]"
+            />
+          </ReactFlow>
+
+          {/* Add-frame button (top-right of canvas) */}
           <button
-            onClick={() => createFrame(0, 0)}
+            onClick={addNode}
             title="Add frame"
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-pink-600 text-white shadow-lg hover:bg-pink-500 transition-colors"
+            className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-pink-600 text-white shadow-lg hover:bg-pink-500"
           >
             <Plus className="h-4 w-4" />
           </button>
-          <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 transition-colors">
-            <Grid3X3 className="h-3.5 w-3.5" />
-          </button>
-          <button className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.06] border border-white/10 text-white/40 hover:text-white/70 transition-colors">
-            <MousePointer2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
 
-        {/* Bottom-right task list */}
-        <div className="absolute bottom-32 right-3 z-10 flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5">
-          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-white/10 text-[9px] text-white/70">
-            ✓
-          </div>
-          <div className="leading-tight">
-            <div className="text-[11px] font-medium text-white/80">任务列表</div>
-            <div className="text-[10px] text-white/40">
-              {agentStatus || (isGenerating ? "生成中…" : "当前无任务")}
+          {/* Agent status pill */}
+          {agentStatus && (
+            <div className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-pink-500/30 bg-black/70 px-4 py-1.5 backdrop-blur-sm">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-pink-400" />
+              <span className="text-xs text-white/80">{agentStatus}</span>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Bottom-right zoom controls */}
-        <div className="absolute bottom-20 right-3 flex items-center gap-1 rounded-lg bg-white/[0.06] border border-white/10 p-0.5 z-10">
-          <button
-            onClick={() => {
-              setZoom(100);
-              setPanOffset({ x: 0, y: 0 });
-            }}
-            className="flex h-7 w-7 items-center justify-center text-white/40 hover:text-white/70 transition-colors"
-            title="Reset zoom & pan"
-          >
-            <Search className="h-3 w-3" />
-          </button>
-          <button
-            onClick={() => setZoom((z) => Math.max(10, z - 10))}
-            className="flex h-7 w-7 items-center justify-center text-white/40 hover:text-white/70 transition-colors"
-          >
-            <Minus className="h-3 w-3" />
-          </button>
-          <span className="min-w-[38px] text-center text-[11px] text-white/50">
-            {zoom}%
-          </span>
-          <button
-            onClick={() => setZoom((z) => Math.min(200, z + 10))}
-            className="flex h-7 w-7 items-center justify-center text-white/40 hover:text-white/70 transition-colors"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      </main>
-
-      {/* ── Oii Agent dock (bottom-left, floating) ── */}
-      <div className="absolute bottom-4 left-4 z-30 w-[340px] rounded-xl border border-white/10 bg-[oklch(0.11_0_0)]/95 shadow-2xl backdrop-blur-sm">
-        {/* Dock header */}
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
-            <Sparkles className="h-3.5 w-3.5 text-pink-400" /> Oii Agent
-          </span>
-          <button
-            onClick={() => setShowSkills((v) => !v)}
-            className="text-white/40 hover:text-white/70 transition-colors"
-            title="Toggle skills"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        {/* Textarea */}
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault();
-              handleGenerate();
-            }
-          }}
-          placeholder="拖拽 / 粘贴 🖼 图片到这，或描述你的故事…"
-          rows={2}
-          className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-white outline-none placeholder:text-white/30"
-        />
-
-        {/* Toolbar row */}
-        <div className="flex items-center justify-between px-3 pb-2">
-          <div className="flex items-center gap-0.5">
-            {["Skill", "Agent", "Styles", "Assets"].map((label) => (
-              <button
-                key={label}
-                onClick={() => toolbarAction(label)}
-                className="rounded-md px-1.5 py-1 text-[11px] text-white/40 hover:bg-white/[0.06] hover:text-white/70 transition-colors"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating || !prompt.trim()}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-white hover:bg-pink-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {isGenerating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <SendHorizontal className="h-3.5 w-3.5" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Agent plan review panel (dialogue / approval mode) ── */}
-      {planDraft && (
-        <div className="fixed right-3 top-16 bottom-24 z-40 flex w-[360px] flex-col rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] shadow-2xl">
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <span className="flex items-center gap-2 text-sm font-semibold text-white">
-              <Sparkles className="h-4 w-4 text-pink-400" /> Review plan
+        {/* Oii Agent dock (bottom-left) */}
+        <div className="absolute bottom-4 left-4 z-30 w-[340px] rounded-xl border border-white/10 bg-[oklch(0.11_0_0)]/95 shadow-2xl backdrop-blur-sm">
+          <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
+              <Sparkles className="h-3.5 w-3.5 text-pink-400" /> Agent
             </span>
-            <button
-              onClick={() => setPlanDraft(null)}
-              className="text-white/50 hover:text-white"
-            >
-              <X className="h-4 w-4" />
+            <button onClick={() => setShowSkills((v) => !v)} className="text-white/40 hover:text-white/70">
+              <Maximize2 className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
-            {/* Agent activity */}
-            <div className="space-y-1.5">
-              {agentLog.map((item, i) => (
-                <div key={i} className="rounded-lg bg-white/[0.04] px-3 py-1.5">
-                  <div className="text-[10px] font-semibold text-pink-400">{item.agent}</div>
-                  <div className="text-[11px] text-white/70">{item.text}</div>
-                </div>
+          {showSkills && (
+            <div className="flex gap-2 overflow-x-auto px-3 pt-2 no-scrollbar">
+              {skillCards.map((c) => (
+                <button
+                  key={c.title}
+                  onClick={() => {
+                    setPrompt(c.preset);
+                    setShowSkills(false);
+                  }}
+                  className={`flex h-16 w-24 shrink-0 flex-col justify-end rounded-lg border bg-gradient-to-br ${c.accent} ${c.bg} p-2 text-left transition-transform hover:scale-105`}
+                >
+                  <span className="text-[9px] font-bold uppercase tracking-wide text-white">{c.title}</span>
+                </button>
               ))}
             </div>
+          )}
 
-            {/* Title */}
-            <label className="block">
-              <span className="text-[10px] uppercase tracking-wide text-white/40">Title</span>
-              <input
-                value={planDraft.title}
-                onChange={(e) => setPlanDraft((p) => (p ? { ...p, title: e.target.value } : p))}
-                className="mt-1 w-full rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-sm text-white outline-none focus:border-pink-500/50"
-              />
-            </label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                handleGenerate();
+              }
+            }}
+            placeholder="描述你的故事，然后点 Agent 生成分镜…"
+            rows={2}
+            className="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm text-white outline-none placeholder:text-white/30"
+          />
 
-            {/* Character */}
-            <label className="block">
-              <span className="text-[10px] uppercase tracking-wide text-white/40">
-                Character — {planDraft.characterName}
-              </span>
-              <textarea
-                value={planDraft.appearance}
-                onChange={(e) =>
-                  setPlanDraft((p) => (p ? { ...p, appearance: e.target.value } : p))
-                }
-                rows={3}
-                className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/90 outline-none focus:border-pink-500/50"
-              />
-            </label>
-
-            {/* Shots */}
-            <div>
-              <span className="text-[10px] uppercase tracking-wide text-white/40">
-                Shots ({planDraft.shots.length})
-              </span>
-              <div className="mt-1.5 space-y-2">
-                {planDraft.shots.map((shot, i) => (
-                  <div key={shot.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
-                    <div className="mb-1 flex items-center justify-between">
-                      <span className="text-[10px] font-medium text-white/60">
-                        Shot {i + 1} · {shot.shot_type.replace(/-/g, " ")}
-                      </span>
-                      <button
-                        onClick={() =>
-                          setPlanDraft((p) =>
-                            p ? { ...p, shots: p.shots.filter((s) => s.id !== shot.id) } : p
-                          )
-                        }
-                        className="text-white/30 hover:text-red-400"
-                        title="Remove shot"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                    <textarea
-                      value={shot.image_prompt}
-                      onChange={(e) =>
-                        setPlanDraft((p) =>
-                          p
-                            ? {
-                                ...p,
-                                shots: p.shots.map((s) =>
-                                  s.id === shot.id ? { ...s, image_prompt: e.target.value } : s
-                                ),
-                              }
-                            : p
-                        )
-                      }
-                      rows={2}
-                      className="w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-white/90 outline-none focus:border-pink-500/50"
-                    />
-                  </div>
-                ))}
-              </div>
+          <div className="flex items-center justify-between px-3 pb-2">
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleAgentPlan}
+                disabled={isGenerating}
+                className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-white/80 hover:bg-white/[0.1] disabled:opacity-40"
+              >
+                ✦ Agent
+              </button>
             </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
             <button
-              onClick={() => setPlanDraft(null)}
-              className="flex-1 rounded-md border border-white/10 py-2 text-xs text-white/70 hover:bg-white/5"
+              onClick={handleGenerate}
+              disabled={isGenerating || !prompt.trim()}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-pink-600 text-white transition-colors hover:bg-pink-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Discard
-            </button>
-            <button
-              onClick={handleApprovePlan}
-              disabled={isGenerating}
-              className="flex flex-[2] items-center justify-center gap-1.5 rounded-md bg-pink-600 py-2 text-xs font-semibold text-white hover:bg-pink-500 disabled:opacity-40"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              Generate storyboard
+              {isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SendHorizontal className="h-3.5 w-3.5" />}
             </button>
           </div>
         </div>
-      )}
 
-      {/* ── Finished Film modal ── */}
-      {filmUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setFilmUrl(null)}
-        >
-          <div
-            className="w-full max-w-3xl rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <span className="flex items-center gap-2 text-sm font-medium text-white">
-                <Film className="h-4 w-4 text-pink-400" /> {projectName}
+        {/* Plan review panel */}
+        {planDraft && (
+          <div className="fixed right-4 top-16 bottom-4 z-40 flex w-[360px] flex-col rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <span className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Sparkles className="h-4 w-4 text-pink-400" /> Review plan
               </span>
-              <button
-                onClick={() => setFilmUrl(null)}
-                className="text-white/50 hover:text-white"
-              >
+              <button onClick={() => setPlanDraft(null)} className="text-white/50 hover:text-white">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <video
-              src={filmUrl}
-              controls
-              autoPlay
-              className="w-full rounded-lg bg-black"
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <a
-                href={filmUrl}
-                download
-                className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-white/80 hover:bg-white/5"
-              >
-                Download
-              </a>
+            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+              <div className="space-y-1.5">
+                {agentLog.map((item, i) => (
+                  <div key={i} className="rounded-lg bg-white/[0.04] px-3 py-1.5">
+                    <div className="text-[10px] font-semibold text-pink-400">{item.agent}</div>
+                    <div className="text-[11px] text-white/70">{item.text}</div>
+                  </div>
+                ))}
+              </div>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-white/40">Title</span>
+                <input
+                  value={planDraft.title}
+                  onChange={(e) => setPlanDraft((p) => (p ? { ...p, title: e.target.value } : p))}
+                  className="mt-1 w-full rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-sm text-white outline-none focus:border-pink-500/50"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-white/40">Character — {planDraft.characterName}</span>
+                <textarea
+                  value={planDraft.appearance}
+                  onChange={(e) => setPlanDraft((p) => (p ? { ...p, appearance: e.target.value } : p))}
+                  rows={3}
+                  className="mt-1 w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5 text-xs text-white/90 outline-none focus:border-pink-500/50"
+                />
+              </label>
+              <div>
+                <span className="text-[10px] uppercase tracking-wide text-white/40">Shots ({planDraft.shots.length})</span>
+                <div className="mt-1.5 space-y-2">
+                  {planDraft.shots.map((shot, i) => (
+                    <div key={shot.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[10px] font-medium text-white/60">
+                          Shot {i + 1} · {shot.shot_type.replace(/-/g, " ")}
+                        </span>
+                        <button
+                          onClick={() => setPlanDraft((p) => (p ? { ...p, shots: p.shots.filter((s) => s.id !== shot.id) } : p))}
+                          className="text-white/30 hover:text-red-400"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <textarea
+                        value={shot.image_prompt}
+                        onChange={(e) =>
+                          setPlanDraft((p) =>
+                            p ? { ...p, shots: p.shots.map((s) => (s.id === shot.id ? { ...s, image_prompt: e.target.value } : s)) } : p
+                          )
+                        }
+                        rows={2}
+                        className="w-full resize-none rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-white/90 outline-none focus:border-pink-500/50"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
+              <button onClick={() => setPlanDraft(null)} className="flex-1 rounded-md border border-white/10 py-2 text-xs text-white/70 hover:bg-white/5">
+                Discard
+              </button>
               <button
-                onClick={() => setFilmUrl(null)}
-                className="rounded-md bg-pink-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-pink-500"
+                onClick={handleApprovePlan}
+                disabled={isGenerating}
+                className="flex flex-[2] items-center justify-center gap-1.5 rounded-md bg-pink-600 py-2 text-xs font-semibold text-white hover:bg-pink-500 disabled:opacity-40"
               >
-                Done
+                <Sparkles className="h-3.5 w-3.5" />
+                Generate storyboard
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {/* Film modal */}
+        {filmUrl && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setFilmUrl(null)}>
+            <div className="w-full max-w-3xl rounded-xl border border-white/10 bg-[oklch(0.11_0_0)] p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-3 flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm font-medium text-white">
+                  <Film className="h-4 w-4 text-pink-400" /> {projectName}
+                </span>
+                <button onClick={() => setFilmUrl(null)} className="text-white/50 hover:text-white">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video src={filmUrl} controls autoPlay className="w-full rounded-lg bg-black" />
+              <div className="mt-3 flex justify-end gap-2">
+                <a href={filmUrl} download className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-white/80 hover:bg-white/5">
+                  Download
+                </a>
+                <button onClick={() => setFilmUrl(null)} className="rounded-md bg-pink-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-pink-500">
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </FrameActionsContext.Provider>
+  );
+}
+
+export default function WorkspacePage() {
+  return (
+    <ReactFlowProvider>
+      <WorkspaceInner />
+    </ReactFlowProvider>
   );
 }
