@@ -29,11 +29,14 @@ export async function generateImage(params: ImageGenParams, overrideApiKey?: str
     enhancedPrompt += `. Avoid: ${params.negative_prompt}`;
   }
 
-  // When reference images are supplied, gpt-image-1 uses them to keep the subject
-  // (e.g. a locked character) consistent across generations.
+  // When reference images are supplied, the image model uses them to keep the
+  // subject (e.g. a locked character) consistent across generations.
   const input_references = (params.reference_images ?? [])
     .filter(Boolean)
     .map((url) => ({ type: "image_url", image_url: { url } }));
+
+  // Default to OpenAI's gpt-5.4-image-2; overridable via OPENROUTER_IMAGE_MODEL.
+  const model = process.env.OPENROUTER_IMAGE_MODEL || "openai/gpt-5.4-image-2";
 
   const response = await fetch(OPENROUTER_IMAGES_URL, {
     method: "POST",
@@ -42,7 +45,7 @@ export async function generateImage(params: ImageGenParams, overrideApiKey?: str
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "openai/gpt-image-1",
+      model,
       prompt: enhancedPrompt,
       n: 1,
       aspect_ratio,
