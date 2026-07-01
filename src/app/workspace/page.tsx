@@ -31,6 +31,12 @@ import {
   Film,
   Maximize2,
   X,
+  Clipboard,
+  Undo2,
+  CheckSquare,
+  LayoutGrid,
+  ImagePlus,
+  Upload,
 } from "lucide-react";
 import { FrameNode, FrameActionsContext, type FrameData } from "@/components/workspace/frame-node";
 
@@ -81,10 +87,36 @@ const PIPELINE_TABS = ["总览", "剧本", "角色", "场景", "分镜", "视频
 
 const nid = () => `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
+function MenuItem({
+  icon,
+  label,
+  shortcut,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  shortcut?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-white/80 transition-colors hover:bg-white/[0.06] disabled:opacity-30 disabled:hover:bg-transparent"
+    >
+      <span className="text-white/50">{icon}</span>
+      <span className="flex-1">{label}</span>
+      {shortcut && <span className="text-[11px] text-white/30">{shortcut}</span>}
+    </button>
+  );
+}
+
 function WorkspaceInner() {
   const router = useRouter();
   const { user, signOut } = useAuth();
-  const { getNode, getNodes, setCenter, fitView } = useReactFlow();
+  const { getNode, getNodes, getEdges, setCenter, fitView, screenToFlowPosition } = useReactFlow();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FrameData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -101,12 +133,131 @@ function WorkspaceInner() {
   const avatar = user?.email?.[0]?.toUpperCase() ?? "U";
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Right-click context menu + interaction state
+  const [menu, setMenu] = useState<{ x: number; y: number; fx: number; fy: number } | null>(null);
+  const [multiSelect, setMultiSelect] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const historyRef = useRef<{ nodes: Node<FrameData>[]; edges: Edge[] }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const patchData = useCallback(
     (id: string, patch: Partial<FrameData>) => {
       setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
     },
     [setNodes]
   );
+
+  // ── History (undo) ──
+  const pushHistory = useCallback(() => {
+    historyRef.current.push({ nodes: getNodes() as Node<FrameData>[], edges: getEdges() });
+    if (historyRef.current.length > 30) historyRef.current.shift();
+    setCanUndo(true);
+  }, [getNodes, getEdges]);
+  const undo = useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+    setCanUndo(historyRef.current.length > 0);
+  }, [setNodes, setEdges]);
+
+  // ── Context-menu actions ──
+  const addFrameAt = useCallback(
+    (pos: { x: number; y: number }) => {
+      pushHistory();
+      setNodes((nds) => [...nds, { id: nid(), type: "frame", position: pos, data: {} }]);
+    },
+    [pushHistory, setNodes]
+  );
+
+  const uploadFileToNode = useCallback(
+    async (file: File, pos: { x: number; y: number }) => {
+      if (!file.type.startsWith("image/")) {
+        toast("Only image files are supported.");
+        return;
+      }
+      pushHistory();
+      const id = nid();
+      setNodes((nds) => [...nds, { id, type: "frame", position: pos, data: { label: "Uploaded", status: "generating" } }]);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload-image", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+        patchData(id, { imageUrl: data.url, label: "Uploaded", status: "done" });
+      } catch (err) {
+        patchData(id, { status: "error", label: "⚠ Upload" });
+        toast.error(err instanceof Error ? err.message : "Upload failed");
+      }
+    },
+    [pushHistory, setNodes, patchData]
+  );
+
+  const onFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (file) uploadFileToNode(file, pendingPos.current);
+    },
+    [uploadFileToNode]
+  );
+
+  const pasteImage = useCallback(
+    async (pos: { x: number; y: number }) => {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const type = item.types.find((t) => t.startsWith("image/"));
+          if (type) {
+            const blob = await item.getType(type);
+            await uploadFileToNode(new File([blob], "pasted.png", { type }), pos);
+            return;
+          }
+        }
+        toast("剪贴板里没有图片。");
+      } catch {
+        toast("无法读取剪贴板。");
+      }
+    },
+    [uploadFileToNode]
+  );
+
+  // 一键整理 — re-flow nodes into a clean vertical spine.
+  const autoArrange = useCallback(() => {
+    const ns = getNodes() as Node<FrameData>[];
+    if (ns.length === 0) return;
+    pushHistory();
+    const rank = (n: Node<FrameData>) => {
+      const l = n.data.label ?? "";
+      if (l.startsWith("★")) return -1;
+      const m = l.match(/Shot (\d+)/);
+      return m ? parseInt(m[1]) : 999;
+    };
+    const ordered = [...ns].sort((a, b) => rank(a) - rank(b) || a.position.y - b.position.y);
+    setNodes((cur) =>
+      cur.map((n) => {
+        const idx = ordered.findIndex((o) => o.id === n.id);
+        return { ...n, position: { x: 0, y: idx * 340 } };
+      })
+    );
+    setEdges(
+      ordered.slice(1).map((o, i) => ({ id: `e-${ordered[i].id}-${o.id}`, source: ordered[i].id, target: o.id }))
+    );
+    setTimeout(() => fitView({ duration: 500, padding: 0.2 }), 60);
+  }, [getNodes, pushHistory, setNodes, setEdges, fitView]);
+
+  const onPaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault();
+      const flow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      pendingPos.current = flow;
+      setMenu({ x: e.clientX, y: e.clientY, fx: flow.x, fy: flow.y });
+    },
+    [screenToFlowPosition]
+  );
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   // ── Persistence ──
   const saveWorkspace = useCallback(async () => {
@@ -257,10 +408,11 @@ function WorkspaceInner() {
   );
   const onDelete = useCallback(
     (id: string) => {
+      pushHistory();
       setNodes((nds) => nds.filter((n) => n.id !== id));
       setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
     },
-    [setNodes, setEdges]
+    [pushHistory, setNodes, setEdges]
   );
 
   const onConnect = useCallback((c: Connection) => setEdges((eds) => addEdge(c, eds)), [setEdges]);
@@ -587,6 +739,11 @@ function WorkspaceInner() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onPaneContextMenu={onPaneContextMenu}
+            onPaneClick={closeMenu}
+            onNodeContextMenu={onPaneContextMenu}
+            selectionOnDrag={multiSelect}
+            panOnDrag={!multiSelect}
             nodeTypes={nodeTypes}
             defaultEdgeOptions={defaultEdgeOptions}
             fitView
@@ -626,6 +783,73 @@ function WorkspaceInner() {
             </div>
           )}
         </div>
+
+        {/* Hidden file input for upload */}
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+
+        {/* Right-click context menu */}
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={closeMenu} onContextMenu={(e) => e.preventDefault()} />
+            <div
+              className="fixed z-50 w-52 overflow-hidden rounded-xl border border-white/10 bg-[oklch(0.12_0_0)] py-1 shadow-2xl"
+              style={{ left: menu.x, top: menu.y }}
+            >
+              <MenuItem
+                icon={<Clipboard className="h-3.5 w-3.5" />}
+                label="粘贴"
+                shortcut="Ctrl+V"
+                onClick={() => {
+                  pasteImage({ x: menu.fx, y: menu.fy });
+                  closeMenu();
+                }}
+              />
+              <MenuItem
+                icon={<Undo2 className="h-3.5 w-3.5" />}
+                label="撤销"
+                shortcut="Ctrl+Z"
+                disabled={!canUndo}
+                onClick={() => {
+                  undo();
+                  closeMenu();
+                }}
+              />
+              <MenuItem
+                icon={<CheckSquare className={`h-3.5 w-3.5 ${multiSelect ? "text-pink-400" : ""}`} />}
+                label="多选"
+                onClick={() => {
+                  setMultiSelect((v) => !v);
+                  closeMenu();
+                }}
+              />
+              <MenuItem
+                icon={<LayoutGrid className="h-3.5 w-3.5" />}
+                label="一键整理"
+                onClick={() => {
+                  autoArrange();
+                  closeMenu();
+                }}
+              />
+              <div className="my-1 h-px bg-white/[0.06]" />
+              <MenuItem
+                icon={<ImagePlus className="h-3.5 w-3.5" />}
+                label="添加素材"
+                onClick={() => {
+                  addFrameAt({ x: menu.fx, y: menu.fy });
+                  closeMenu();
+                }}
+              />
+              <MenuItem
+                icon={<Upload className="h-3.5 w-3.5" />}
+                label="上传"
+                onClick={() => {
+                  fileInputRef.current?.click();
+                  closeMenu();
+                }}
+              />
+            </div>
+          </>
+        )}
 
         {/* Oii Agent dock (bottom-left) */}
         <div className="absolute bottom-4 left-4 z-30 w-[340px] rounded-xl border border-white/10 bg-[oklch(0.11_0_0)]/95 shadow-2xl backdrop-blur-sm">
