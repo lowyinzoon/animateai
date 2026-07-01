@@ -65,13 +65,13 @@ export async function POST(request: Request) {
       : "digital art";
     const enhancedPrompt = `${styleLabel} style: ${meta.appearance_prompt}. ${prompt}. Maintain exact character appearance, proportions, and design details.`;
 
-    // Generate image
-    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
+    // Generate image via OpenAI (direct). Per-user key optional; else server env.
+    const userOpenaiKey = user.user_metadata?.api_keys?.openai;
     const imageBuffer = await generateImage({
       prompt: enhancedPrompt,
       width: width || 1024,
       height: height || 1024,
-    }, userOpenrouterKey);
+    }, userOpenaiKey);
 
     // Upload to storage
     const fileName = `${user.id}/characters/${Date.now()}.png`;

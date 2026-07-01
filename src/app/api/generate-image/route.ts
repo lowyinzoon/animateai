@@ -26,8 +26,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    // Generate image via OpenRouter
-    const userOpenrouterKey = user.user_metadata?.api_keys?.openrouter;
+    // Generate image via OpenAI (direct). Per-user key optional; else server env.
+    const userOpenaiKey = user.user_metadata?.api_keys?.openai;
     const imageBuffer = await generateImage({
       prompt,
       negative_prompt,
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       height: height || 1024,
       style_preset,
       reference_images: Array.isArray(reference_images) ? reference_images : undefined,
-    }, userOpenrouterKey);
+    }, userOpenaiKey);
 
     // Use admin client for storage/DB (bypasses RLS)
     const admin = createAdminClient();
